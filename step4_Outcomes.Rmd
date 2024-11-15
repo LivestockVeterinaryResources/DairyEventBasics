@@ -1,0 +1,340 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-11-14"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+
+```
+
+```{r}
+
+events2<-read_rds('events2.rds')%>%
+  filter(!(is.na(bdat)))%>% 
+  mutate(data_pull_date = max(date, na.rm = TRUE))%>%
+  mutate(data_pull_date = max(date, na.rm = TRUE))%>%
+  mutate(
+    breed = case_when(
+      is.na(breed)~'Unkown', 
+      TRUE~breed), 
+    source_farm = case_when(
+      is.na(source_farm)~'Unknown', 
+      TRUE~source_farm), 
+    source_state = case_when(
+      is.na(source_state)~'Unknown',
+      TRUE~source_state)
+          )
+
+```
+
+
+## Treatment Outcomes (Incomplete - need dead data)
+
+```{r lag_code}
+
+source('FUNCTIONS/fxn_lag_master.R')
+
+
+
+
+arrange_vars <- alist(tag, eid, date) #removed: Reason2, Disease, we need a "stop if list contains 'lag'
+
+sort_vars <- c('tag', 'eid') #removed:"Reason2", "Disease",
+
+#Gap1 ----------------------
+
+set_outcome_gap<- 1
+
+df_1<-test_fxn1(x = treats%>%
+                  mutate(date = Date),
+                arrange_var = arrange_vars,
+                mutate_var = sort_vars,
+                prefix = "g1_",
+                gap = set_outcome_gap)%>% #gap set to identify regimens
+  rename(g1_key = key,
+         g1_date_gap = date_gap,
+         g1_ct = lag_ct)%>%
+  select(-(contains('lag')))%>%
+  group_by(tag, eid, g1_key)%>%
+  mutate(g1_pull_ct = 1:n(), 
+         g1_pull_ct_max = sum(n()))%>%
+  ungroup()%>%
+  mutate(g1_outcome = case_when(
+    (g1_pull_ct < g1_pull_ct_max)~'Retreat', 
+    (g1_pull_ct == g1_pull_ct_max)~'Final Tx', 
+    TRUE~'Error')
+  )
+
+
+#Gap2 ----------------------
+
+set_outcome_gap<- 2
+
+df_2<-test_fxn1(x = df_1,
+                arrange_var = arrange_vars,
+                mutate_var = sort_vars,
+                prefix = "g2_",
+                gap = set_outcome_gap)%>% #gap set to identify regimens
+  rename(g2_key = key,
+         g2_date_gap = date_gap,
+         g2_ct = lag_ct)%>%
+  select(-(contains('lag')))%>%
+  group_by(tag, eid, g2_key)%>%
+  mutate(g2_pull_ct = 1:n(), 
+         g2_pull_ct_max = sum(n()))%>%
+  ungroup()%>%
+  mutate(g2_outcome = case_when(
+    (g2_pull_ct < g2_pull_ct_max)~'Retreat', 
+    (g2_pull_ct == g2_pull_ct_max)~'Final Tx', 
+    TRUE~'Error')
+  )
+
+
+#Gap3 ----------------------
+
+set_outcome_gap<- 3
+
+df_3<-test_fxn1(x = df_2,
+                arrange_var = arrange_vars,
+                mutate_var = sort_vars,
+                prefix = "g3_",
+                gap = set_outcome_gap)%>% #gap set to identify regimens
+  rename(g3_key = key,
+         g3_date_gap = date_gap,
+         g3_ct = lag_ct)%>%
+  select(-(contains('lag')))%>%
+  group_by(tag, eid, g3_key)%>%
+  mutate(g3_pull_ct = 1:n(), 
+         g3_pull_ct_max = sum(n()))%>%
+  ungroup()%>%
+  mutate(g3_outcome = case_when(
+    (g3_pull_ct < g3_pull_ct_max)~'Retreat', 
+    (g3_pull_ct == g3_pull_ct_max)~'Final Tx', 
+    TRUE~'Error')
+  )
+
+#Gap7 ----------------------
+
+set_outcome_gap<- 7
+
+df_7<-test_fxn1(x = df_3,
+                arrange_var = arrange_vars,
+                mutate_var = sort_vars,
+                prefix = "g7_",
+                gap = set_outcome_gap)%>% #gap set to identify regimens
+  rename(g7_key = key,
+         g7_date_gap = date_gap,
+         g7_ct = lag_ct)%>%
+  select(-(contains('lag')))%>%
+  group_by(tag, eid, g7_key)%>%
+  mutate(g7_pull_ct = 1:n(), 
+         g7_pull_ct_max = sum(n()))%>%
+  ungroup()%>%
+  mutate(g7_outcome = case_when(
+    (g7_pull_ct < g7_pull_ct_max)~'Retreat', 
+    (g7_pull_ct == g7_pull_ct_max)~'Final Tx', 
+    TRUE~'Error')
+  )
+
+#Gap30 ----------------------
+
+set_outcome_gap<- 30
+
+df_30<-test_fxn1(x = df_7,
+                arrange_var = arrange_vars,
+                mutate_var = sort_vars,
+                prefix = "g30_",
+                gap = set_outcome_gap)%>% #gap set to identify regimens
+  rename(g30_key = key,
+         g30_date_gap = date_gap,
+         g30_ct = lag_ct)%>%
+  select(-(contains('lag')))%>%
+  group_by(tag, eid, g30_key)%>%
+  mutate(g30_pull_ct = 1:n(), 
+         g30_pull_ct_max = sum(n()))%>%
+  ungroup()%>%
+  mutate(g30_outcome = case_when(
+    (g30_pull_ct < g30_pull_ct_max)~'Retreat', 
+    (g30_pull_ct == g30_pull_ct_max)~'Final Tx', 
+    TRUE~'Error')
+  )
+
+
+
+
+
+```
+
+
+
+
+We need to add the dead detail data before we can interpret these. They are extremely OPTIMISTIC without it. 
+That said, the treatment failure rate is higher than I would like across the yard, not just the pens we are concerned about even before we add the deads in.
+
+#### 30 day outcomes
+
+```{r outcome_summary}
+outcomes30<-df_30%>%
+  group_by(Pen_simple, g30_outcome, g30_pull_ct)%>%
+  summarize(
+            ct_pull = n_distinct(g30_key))%>%
+  ungroup()%>%
+  pivot_wider(names_from = g30_outcome, values_from = ct_pull)%>%
+  mutate(total = `Final Tx` + Retreat)%>%
+  mutate(pctRetreat = Retreat/total, 
+         pctSuccess = `Final Tx`/total)
+
+targets<-tibble(g30_pull_ct = c(1, 2, 3), 
+                target_success = c(.8, .5, .3), 
+                limit_retreat = c(.2, .5, .7))
+
+ggplot(outcomes30%>%
+         filter(g30_pull_ct<4))+
+  geom_hline(data = targets,
+             aes(yintercept = target_success), color = 'red')+
+    geom_text(data = targets,
+              aes(y = target_success, x = Inf, label = 'Target'), color = 'red', hjust = 1, vjust = 1)+
+  geom_bar(aes(x = Pen_simple, y = pctSuccess, fill = factor(g30_pull_ct)), stat = 'identity')+
+  facet_grid(g30_pull_ct~.)+
+  labs(title = 'Treatment Success')+
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))+
+  scale_fill_manual(values = c('#252525', '#636363', '#969696'))+
+  theme_bw()+
+  labs(fill = 'Pull Count')+
+  ylab('Percent of Treatments')+
+  xlab('Pen')
+
+
+# ggplot(outcomes30%>%
+#          filter(g30_pull_ct<4))+
+#   geom_bar(aes(x = Pen_simple, y = pctRetreat, fill = factor(g30_pull_ct)), stat = 'identity')+
+#   geom_hline(aes(yintercept = .2), color = 'black')+
+#     geom_text(aes(y = .2, x = Inf, label = 'Limit'), color = 'black', hjust = 1, vjust = 1)+
+# 
+#   facet_grid(g30_pull_ct~.)+
+#   labs(title = 'Treatment Failures')+
+#   scale_y_continuous(labels = scales::percent_format(accuracy = 1))+
+#   scale_fill_manual(values = c('#a50f15', '#de2d26', '#fb6a4a'))+
+#   theme_bw()
+
+
+
+```
+
+\newpage
+
+
+
+
+#### 3 day outcomes
+
+These are the outcomes if we evaluate at day 3 after first treatment.
+
+```{r}
+outcomes3<-df_30%>%
+  group_by(Pen_simple, g3_outcome, g3_pull_ct)%>%
+  summarize(
+            ct_pull = n_distinct(g3_key))%>%
+  ungroup()%>%
+  pivot_wider(names_from = g3_outcome, values_from = ct_pull)%>%
+  mutate(total = `Final Tx` + Retreat)%>%
+  mutate(pctRetreat = Retreat/total, 
+         pctSuccess = `Final Tx`/total)
+
+targets<-tibble(g3_pull_ct = c(1, 2, 3), 
+                target_success = c(.8, .5, .3))
+
+ggplot(outcomes3%>%
+         filter(g3_pull_ct<4))+
+  geom_hline(data = targets,
+             aes(yintercept = target_success), color = 'red')+
+    geom_text(data = targets,
+              aes(y = target_success, x = Inf, label = 'Target'), color = 'red', hjust = 1, vjust = 1)+
+  geom_bar(aes(x = Pen_simple, y = pctSuccess, fill = factor(g3_pull_ct)), stat = 'identity')+
+  facet_grid(g3_pull_ct~.)+
+  labs(title = 'Treatment Success')+
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))+
+  scale_fill_manual(values = c('#252525', '#636363', '#969696'))+
+  theme_bw()+
+  labs(fill = 'Pull Count')+
+  ylab('Percent of Treatments')+
+  xlab('Pen')
+
+
+# ggplot(outcomes3%>%
+#          filter(g3_pull_ct<4))+
+#   geom_bar(aes(x = Pen_simple, y = pctRetreat, fill = factor(g3_pull_ct)), stat = 'identity')+
+#   geom_hline(aes(yintercept = .2), color = 'black')+
+#     geom_text(aes(y = .2, x = Inf, label = 'Limit'), color = 'black', hjust = 1, vjust = 1)+
+# 
+#   facet_grid(g3_pull_ct~.)+
+#   labs(title = 'Treatment Failures')+
+#   scale_y_continuous(labels = scales::percent_format(accuracy = 1))+
+#   scale_fill_manual(values = c('#a50f15', '#de2d26', '#fb6a4a'))+
+#   theme_bw()
+# 
+
+
+```
+
+\newpage
+
+#### 7 day outcomes
+
+These are the outcomes if we evaluate at day 7 after first treatment.
+
+```{r}
+outcomes7<-df_30%>%
+  group_by(Pen_simple, g7_outcome, g7_pull_ct)%>%
+  summarize(
+            ct_pull = n_distinct(g7_key))%>%
+  ungroup()%>%
+  pivot_wider(names_from = g7_outcome, values_from = ct_pull)%>%
+  mutate(total = `Final Tx` + Retreat)%>%
+  mutate(pctRetreat = Retreat/total, 
+         pctSuccess = `Final Tx`/total)
+
+targets<-tibble(g7_pull_ct = c(1, 2, 3), 
+                target_success = c(.8, .5, .3))
+
+ggplot(outcomes7%>%
+         filter(g7_pull_ct<4))+
+  geom_hline(data = targets,
+             aes(yintercept = target_success), color = 'red')+
+    geom_text(data = targets,
+              aes(y = target_success, x = Inf, label = 'Target'), color = 'red', hjust = 1, vjust = 1)+
+  geom_bar(aes(x = Pen_simple, y = pctSuccess, fill = factor(g7_pull_ct)), stat = 'identity')+
+  facet_grid(g7_pull_ct~.)+
+  labs(title = 'Treatment Success')+
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))+
+  scale_fill_manual(values = c('#252525', '#636363', '#969696'))+
+  theme_bw()+
+  labs(fill = 'Pull Count')+
+  ylab('Percent of Treatments')+
+  xlab('Pen')
+
+
+
+# ggplot(outcomes7%>%
+#          filter(g7_pull_ct<4))+
+#   geom_bar(aes(x = Pen_simple, y = pctRetreat, fill = factor(g7_pull_ct)), stat = 'identity')+
+#   geom_hline(aes(yintercept = .2), color = 'black')+
+#     geom_text(aes(y = .2, x = Inf, label = 'Limit'), color = 'black', hjust = 1, vjust = 1)+
+# 
+#   facet_grid(g7_pull_ct~.)+
+#   labs(title = 'Treatment Failures')+
+#   scale_y_continuous(labels = scales::percent_format(accuracy = 1))+
+#   scale_fill_manual(values = c('#a50f15', '#de2d26', '#fb6a4a'))+
+#   theme_bw()
+
+
+
+```
+
+

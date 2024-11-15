@@ -1,0 +1,1404 @@
+---
+title: "KDD Disease Report"
+output: html_document
+
+---
+
+```{r setup, include=FALSE}
+#knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(gt)
+
+library(ggsurvfit)
+
+colors_rank<-c('Very High' = 'red', 'High' = 'orange', 'Expected' = 'grey20', 'Low' = 'cyan', 'Very Low' = 'blue')
+```
+
+```{r}
+
+#df_o<-read_rds('RDS_files/df_gap_final.rds')
+#deads<-read_rds('RDS_files/deads.rds')
+#solds<-read_rds('RDS_files/solds.rds')
+
+calves2<-read_rds('RDS_files/calves2.rds')%>%
+  filter(bdat>(today()-(385*3)))
+
+
+pull_date<-lubridate::ymd('2024-08-14')  #WARNING: this is hard coded for this data set
+
+df_vac_protocol<-tibble(Product = c('Stem 5', 'Stem 5', 'Pro-Bac 3', 
+                                    'Pyramid 5', 'Pyramid 5', 'Nasalgen-3 PMH', 'Nasalgen-3 PHM'), 
+                            VacDay = c(39, 60, 74, 
+                                       21, 42, 50, 75), 
+                        ProtocolName = c('New', 'New', 'New', 'Old', 'Old', 'Old', 'Old')
+)
+
+
+fxn_rank_dz<-function(df_grouped){
+  df_grouped%>%
+    mutate(rank_dz = percent_rank(DiseaseIncidence))%>%
+    mutate(rank_dz_cat = case_when(
+      (rank_dz>0.95)~'Very High', 
+      (rank_dz>0.80)~'High', 
+      (rank_dz>0.20)~'Expected', 
+      (rank_dz>0.05)~'Low', 
+      (rank_dz<=0.057)~'Very Low', 
+      TRUE~as.character(NA)
+    ))%>%
+    mutate(rank_dz_cat = factor(rank_dz_cat, 
+                                levels = c('Very Low', 'Low', 'Expected', 'High', 'Very High')))%>%
+    ungroup()
+}
+
+
+fxn_rank_dz_benchmark<-function(df_grouped){
+  df_grouped%>%
+    mutate(rank_dz_bench = percent_rank(DiseaseIncidence))%>%
+    mutate(rank_dz_cat_bench = case_when(
+      (rank_dz_bench>0.95)~'Very High', 
+      (rank_dz_bench>0.80)~'High', 
+      (rank_dz_bench>0.20)~'Expected', 
+      (rank_dz_bench>0.05)~'Low', 
+      (rank_dz_bench<=0.057)~'Very Low', 
+      TRUE~as.character(NA)
+    ))%>%
+    mutate(rank_dz_cat_bench = factor(rank_dz_cat_bench, 
+                                levels = c('Very Low', 'Low', 'Expected', 'High', 'Very High')))%>%
+    ungroup()
+}
+
+```
+
+
+
+
+
+```{r}
+var_list<-c(colnames(calves2[20:38]))
+#test<-data_surv
+
+#var_list
+
+set_dz<-'SCOURS'
+
+
+set_age_min <- 0
+set_age_max <- 30
+
+#Navel = 20, PNEU = 200, OTITIS = 140, SCOURS = 30, SEPTIC = 50
+
+
+days_in_age_range<-set_age_max-set_age_min              
+
+
+#set_disease_evaluation_time_range<-c(0,30) #use days of age
+set_years_of_history<-2021 #Include years greater than or equal to this one
+
+# disease_evaluation_time_range_text <- paste0(set_disease_evaluation_time_range[1], 
+#                                              ' to ', 
+#                                              set_disease_evaluation_time_range[2])
+
+
+```
+
+## `r paste0(set_dz)` Age `r paste0(set_age_min)` to `r paste0(set_age_max)` days
+
+```{r}
+pick_list<-tibble(disease = var_list, 
+                  dz_number = 1:length(var_list))
+
+pick_dz<-pick_list%>%
+  filter(disease %in% set_dz)
+
+pick_dz[[1,2]]
+
+i=pick_dz[[1,2]] #set disease
+
+
+dz_name<-var_list[i]
+
+#for (i in seq_along(var_list)){
+
+data_surv<-calves2%>%
+  mutate(dz_col = calves2[[var_list[i]]])%>%
+  mutate(date_reach_age_min = bdat+set_age_min, 
+         date_reach_age_max = bdat+set_age_max)%>%
+  #select(dz_col, PNEU)
+  mutate(date_censor_pre = case_when( 
+    (is.na(dz_col)<1)~dz_col,
+    (is.na(date_died)<1)~date_died, 
+    (is.na(date_sold)<1)~date_sold, 
+    (is.na(date_archive)<1)~date_archive,
+    TRUE~pull_date
+  ))%>%
+  mutate(date_censor = case_when(
+    (date_reach_age_max<date_censor_pre)~date_reach_age_max,
+    TRUE~date_censor_pre)
+  )%>%
+  mutate(age_at_pull = pull_date-bdat)%>%
+ mutate(dz_status = case_when(
+    (is.na(dz_col)>0)~0,
+    (dz_col<=date_reach_age_min)~0,
+    (dz_col<=date_reach_age_max)~1,
+    (dz_col>date_reach_age_max)~0,
+   TRUE~as.numeric(NA))
+  )%>%
+  mutate(dz_time = case_when(
+    (is.na(dz_col)<1)~as.numeric(dz_col-bdat),
+    TRUE~as.numeric(date_censor-bdat)
+    ))%>%
+  mutate(birth_cohort_floordate_season = floor_date(bdat, unit = 'seasons'), 
+         birth_cohort_floordate_month = floor_date(bdat, unit = 'month'),
+         
+         birth_cohort_floordate_week = floor_date(bdat, unit = 'week'),
+         birth_cohort_week = week(bdat), 
+
+         birth_cohort_month = month(bdat, label=TRUE), 
+         birth_cohort_year = as.numeric(year(bdat))
+         )%>%
+  #filter according to amount of history selected
+  filter(birth_cohort_year>=set_years_of_history)#%>%
+  #filter according to age of evaluation
+  #filter(age_at_pull>set_age_min)%>%
+  #filter(age_at_pull>set_age_max)
+
+
+
+```
+
+
+
+## Disease Timing
+
+
+```{r, fig.height=5, fig.width=7}
+#All cattle---------------------------
+ggplot()+
+  geom_histogram(data = calves2%>%
+                   mutate(dz_col = calves2[[var_list[i]]])%>%
+                   filter(!(is.na(dz_col)))%>%
+                   mutate(dz_time = as.numeric(dz_col-bdat)
+                      ), 
+         aes(x=dz_time), linewidth = 2, alpha = .8, binwidth = 1)+
+  # geom_histogram(data = data_surv%>%
+  #        filter(dz_status==1)%>%
+  #        filter(dz_time>=0)%>%
+  #        filter(birth_cohort_year>set_years_of_history), 
+  #        aes(x=dz_time), linewidth = 2, alpha = .8, binwidth = 1, color = 'orange')+
+  # geom_histogram(data = data_surv%>%
+  #        filter(dz_status==1)%>%
+  #        filter(dz_time>=0)%>%
+  #        filter(birth_cohort_year>set_years_of_history)%>%
+  #          filter(dz_time>set_age_min)%>%
+  #          filter(dz_time<set_age_max), 
+  #        aes(x=dz_time), linewidth = 2, alpha = .8, binwidth = 1, fill = 'red')+
+
+  coord_cartesian(xlim = c(0, NA))+
+  ylab('Count of Animals')+
+  xlab('Day of age')+
+  #facet_wrap(source_state~.)+
+  theme_bw()+
+  labs(title = paste0('First Treatment Disease Timing All KDD - ', dz_name))
+
+
+```
+
+### Disease Timing by Region
+```{r, fig.height=5, fig.width=7}
+#-----------------------------------
+#Compare Source Sates---------------------------
+ggplot(data_surv%>%
+         filter(dz_status==1)%>%
+         filter(dz_time>=0)%>%
+         filter(birth_cohort_year>set_years_of_history)%>%
+         filter(!(source_state %in% 'Unknown')))+
+    geom_density(aes(x=dz_time), color = 'grey20', linewidth = 3)+
+  geom_density(aes(x=dz_time, color = source_state), linewidth = 2, alpha = .8)+
+  coord_cartesian(xlim = c(set_age_min, set_age_max))+
+  ylab('Estimated Probabilty Density')+
+  xlab('Day of age')+
+  #facet_wrap(source_state~.)+
+  theme_bw()+
+  labs(title = paste0('First Treatment Disease Timing by Region - ', dz_name))
+
+
+
+```
+
+
+
+```{r, fig.show="hold", out.width="50%" }
+
+### Disease Timing by Farm
+
+# df_state_list<-data_surv%>%filter(!(source_state %in% 'Unknown'))
+# list_source_states<-sort(unique(df_state_list$source_state))
+# 
+# #i=2
+# for (i in seq_along(list_source_states)){
+#   
+#   select_source_state<-list_source_states[i]
+# #Compare Source Farms---------------------------
+# p<-ggplot(data_surv%>%
+#          filter(dz_status==1)%>%
+#          filter(dz_time>=0)%>%
+#          filter(birth_cohort_year>set_years_of_history)%>%
+#          filter(!(source_state %in% 'Unknown'))%>%
+#          filter(source_state %in% select_source_state))+
+#    # geom_density(aes(x=dz_time), color = 'grey20', linewidth = 3)+
+#   geom_density(aes(x=dz_time, color = source_farm), )+
+#   coord_cartesian(xlim = c(set_age_min, set_age_max))+
+#   ylab('Probabilty of Disease Each Day')+
+#   xlab('Day of age')+
+#   facet_wrap(source_state~.)+
+#   theme_bw()+
+#   labs(title = paste0('First Treatment Disease Timing - by Farm ', dz_name))
+# #print(p)
+# #print(i)
+# 
+# 
+# }
+
+```
+
+## First Treatment Disease Risk 
+
+Question: Has there been any noticible changes in disease pressure at KDD over time?
+
+This section calculates weekly disease risk at KDD.  There is no separation by age cohort group to allow detection of disease incidence that might be contagious and increase or decrease at certain calendar times.  It is not broken down by region or source farm because the goal here is to look for trends over time in the entire population present at KDD.
+
+
+```{r}
+get_weekly_dates_start<-seq.Date(min(calves2$PNEU, na.rm = T), max(calves2$PNEU, na.rm = T)-7, by = 7)
+
+get_weekly_dates_end<-seq.Date(min(calves2$PNEU, na.rm = T)+6, max(calves2$PNEU, na.rm = T), by = 7)
+
+df_risk<-tibble(start_date = get_weekly_dates_start, 
+                end_date = get_weekly_dates_end)%>%
+  mutate(days_in_period = (end_date-start_date)+1)
+
+
+check<-data_surv%>%
+    filter(cowid %in% '1000739903/15/22')
+
+cows<-unique(data_surv$cowid)
+
+```
+
+### All source disease risk
+
+```{r}
+### get risk days -----------------------------------
+#source('FUNCTIONS/fxn_master_risk.R')
+
+ master_risk<-NULL
+ 
+ #fxn_master_risk()
+# 
+#i=34
+for (i in seq_along(df_risk$start_date)){
+  df_calves<-data_surv%>%
+    #filter(cowid %in% '1000739903/15/22')%>%
+    #filter(cowid %in% cows[1:2000])%>%
+    mutate(start_date = df_risk$start_date[[i]],
+           end_date = df_risk$end_date[[i]])%>%
+    mutate(age_at_start = start_date-bdat,
+           age_at_end = end_date-bdat)%>%
+    filter(age_at_end>=set_age_min)%>%
+    filter(age_at_start<=set_age_max)%>%
+    filter(date_arrived_kdd<=end_date)%>%
+    filter(date_censor>=start_date)%>%
+
+    mutate(start_elig = date_arrived_kdd<=start_date,
+           end_elig = date_censor>=end_date)%>%
+    mutate(period_elig = (start_elig+end_elig))%>%
+    filter(period_elig>0)%>%
+    mutate(days_elig = case_when(
+      (period_elig == 2)~as.numeric(end_date-start_date)+1,
+      (start_elig>0)~as.numeric(date_censor-start_date)+1,
+      (end_elig>0)~as.numeric(end_date-date_arrived_kdd)+1,
+       # (start_elig==FALSE)~as.numeric(date_censor-date_arrived_kdd)+1,
+       # (end_elig==FALSE)~as.numeric(start_date-date_censor)+1,
+      TRUE~as.numeric(NA))
+    )%>%
+    select(days_elig, start_elig, end_elig, period_elig, start_date, end_date,
+           date_arrived_kdd, date_censor, everything())%>%
+    group_by(start_date, end_date)%>%
+    summarize(#start_date = min(start_date),
+              #end_date = min(end_date),
+              days_at_risk = sum(days_elig, na.rm = T),
+              removed = sum(is.na(days_elig), na.rm = T),
+              animals = n_distinct(cowid))%>%
+      ungroup()
+
+
+
+  master_risk<-bind_rows(df_calves, master_risk)
+
+}
+
+#------------------------------------------------
+
+master_risk2<-master_risk%>%
+  mutate(max_date_censor = max(data_surv$date_censor, na.rm = T),
+         min_date_censor = min(data_surv$date_censor, na.rm = T)
+  )%>%
+  mutate(date_valid_for_report = (start_date>(min_date_censor+days_in_age_range))&(end_date<(max_date_censor-days_in_age_range))
+  )
+
+
+```
+
+
+```{r}
+
+### get cases--------------------------------------------------
+#source('FUNCTIONS/fxn_master_cases.R')
+master_cases<-NULL
+
+#fxn_master_cases()
+i=20
+for (i in seq_along(df_risk$start_date)){
+
+  df_cases<-data_surv%>%
+    #filter(cowid %in% '1000739903/15/22')%>%
+    #filter(cowid %in% cows[1:2000])%>%
+    mutate(age_at_disease = dz_col-bdat)%>%
+    filter(dz_status == 1)%>%
+    #select(age_at_disease, cowid, dz_col, bdat, everything())
+    filter(age_at_disease>=set_age_min)%>%
+    filter(age_at_disease<=set_age_max)%>%
+    #filter(date_arrived_kdd>=min(date_censor, na.rm = T)+days_in_age_range)%>%
+
+    mutate(start_date = df_risk$start_date[[i]],
+           end_date = df_risk$end_date[[i]])%>%
+    filter(dz_col>=start_date)%>%
+    filter(dz_col<=end_date)%>%
+    # mutate(start_elig = dz_col>=start_date,
+    #        end_elig = dz_col<=end_date)%>%
+    # filter(start_elig>0)%>%
+    # filter(end_elig>0)%>%
+    group_by(start_date, end_date)%>%
+    summarize(#start_date = min(start_date),
+              #end_date = min(end_date),
+              case_ct = n_distinct(cowid))%>%
+    ungroup()
+
+
+  master_cases<-bind_rows(df_cases, master_cases)
+
+
+}
+
+
+```
+
+
+```{r, fig.height=5, fig.width=7}
+
+### calculate risk-----------------------------------
+#-------------------------------------------------------
+
+disease_risk<-master_risk2%>%
+  #filter(date_valid_for_report==TRUE)%>%
+  left_join(master_cases)%>%
+  mutate(case_ct = case_when(
+    is.na(case_ct)~0,
+    TRUE~case_ct)
+  )%>%
+  mutate(cases_per_adj_days_at_risk = case_ct/(days_in_age_range), 
+         cases_per_animal_at_risk = (case_ct/animals)*100)
+
+#------------------------------
+
+ggplot(disease_risk)+
+      geom_point(aes(x = start_date, y = cases_per_animal_at_risk), color = 'grey40', shape = 8)+
+    geom_point(aes(x = start_date, y = cases_per_adj_days_at_risk), color = 'grey40')+
+  geom_smooth(aes(x = start_date, y = cases_per_adj_days_at_risk), span = .3)+
+  geom_smooth(aes(x = start_date, y = cases_per_animal_at_risk), span = .3, color = 'yellow')+
+  geom_vline(xintercept = lubridate::ymd('2024_03_07'), color = 'grey', fill = 'grey')+
+      geom_text(aes(x = lubridate::ymd('2024_03_07'), y = 0, label = 'KDD Vaccine Protocol Change'), 
+                hjust = 0, color = 'grey', vjust = 1, angle = 90)+
+
+  theme_bw()+
+  labs(title = paste0( dz_name, ' Risk from ', set_age_min, ' to ', set_age_max, ' days of age'), 
+       subtitle = 'Each point represents the risk period of one week',
+       y = paste0('Cases per ', days_in_age_range, ' days at risk (blue)\nCases per 100 animals at risk (yellow)'), 
+       x = 'Calendar Week')+
+  xlim(values = c(min(disease_risk$start_date)+(set_age_max), NA))
+
+
+# ggplot(disease_risk)+
+#   geom_point(aes(x = start_date, y = days_at_risk))
+# 
+# ggplot(disease_risk)+
+#   geom_point(aes(x = start_date, y = case_ct))
+
+
+```
+
+
+### source farm disease risk
+
+```{r}
+### get risk days -----------------------------------
+#source('FUNCTIONS/fxn_master_risk.R')
+
+ master_risk<-NULL
+ 
+ #fxn_master_risk()
+# 
+#i=34
+for (i in seq_along(df_risk$start_date)){
+  df_calves<-data_surv%>%
+    #filter(cowid %in% '1000739903/15/22')%>%
+    #filter(cowid %in% cows[1:2000])%>%
+    mutate(start_date = df_risk$start_date[[i]],
+           end_date = df_risk$end_date[[i]])%>%
+    mutate(age_at_start = start_date-bdat,
+           age_at_end = end_date-bdat)%>%
+    filter(age_at_end>=set_age_min)%>%
+    filter(age_at_start<=set_age_max)%>%
+    filter(date_arrived_kdd<=end_date)%>%
+    filter(date_censor>=start_date)%>%
+
+    mutate(start_elig = date_arrived_kdd<=start_date,
+           end_elig = date_censor>=end_date)%>%
+    mutate(period_elig = (start_elig+end_elig))%>%
+    filter(period_elig>0)%>%
+    mutate(days_elig = case_when(
+      (period_elig == 2)~as.numeric(end_date-start_date)+1,
+      (start_elig>0)~as.numeric(date_censor-start_date)+1,
+      (end_elig>0)~as.numeric(end_date-date_arrived_kdd)+1,
+       # (start_elig==FALSE)~as.numeric(date_censor-date_arrived_kdd)+1,
+       # (end_elig==FALSE)~as.numeric(start_date-date_censor)+1,
+      TRUE~as.numeric(NA))
+    )%>%
+    select(days_elig, start_elig, end_elig, period_elig, start_date, end_date,
+           date_arrived_kdd, date_censor, everything())%>%
+    group_by(start_date, end_date, source_farm)%>%
+    summarize(#start_date = min(start_date),
+              #end_date = min(end_date),
+              days_at_risk = sum(days_elig, na.rm = T),
+              removed = sum(is.na(days_elig), na.rm = T),
+              animals = n_distinct(cowid))%>%
+      ungroup()
+
+
+
+  master_risk<-bind_rows(df_calves, master_risk)
+
+}
+
+#------------------------------------------------
+
+master_risk2<-master_risk%>%
+  mutate(max_date_censor = max(data_surv$date_censor, na.rm = T),
+         min_date_censor = min(data_surv$date_censor, na.rm = T)
+  )%>%
+  mutate(date_valid_for_report = (start_date>(min_date_censor+days_in_age_range))&(end_date<(max_date_censor-days_in_age_range))
+  )
+
+
+```
+
+
+```{r}
+
+### get cases--------------------------------------------------
+#source('FUNCTIONS/fxn_master_cases.R')
+master_cases<-NULL
+
+#fxn_master_cases()
+i=20
+for (i in seq_along(df_risk$start_date)){
+
+  df_cases<-data_surv%>%
+    #filter(cowid %in% '1000739903/15/22')%>%
+    #filter(cowid %in% cows[1:2000])%>%
+    mutate(age_at_disease = dz_col-bdat)%>%
+    filter(dz_status == 1)%>%
+    #select(age_at_disease, cowid, dz_col, bdat, everything())
+    filter(age_at_disease>=set_age_min)%>%
+    filter(age_at_disease<=set_age_max)%>%
+    #filter(date_arrived_kdd>=min(date_censor, na.rm = T)+days_in_age_range)%>%
+
+    mutate(start_date = df_risk$start_date[[i]],
+           end_date = df_risk$end_date[[i]])%>%
+    filter(dz_col>=start_date)%>%
+    filter(dz_col<=end_date)%>%
+    # mutate(start_elig = dz_col>=start_date,
+    #        end_elig = dz_col<=end_date)%>%
+    # filter(start_elig>0)%>%
+    # filter(end_elig>0)%>%
+    group_by(start_date, end_date, source_farm)%>%
+    summarize(#start_date = min(start_date),
+              #end_date = min(end_date),
+              case_ct = n_distinct(cowid))%>%
+    ungroup()
+
+
+  master_cases<-bind_rows(df_cases, master_cases)
+
+
+}
+
+
+```
+
+
+```{r, fig.height=5, fig.width=7}
+
+### calculate risk-----------------------------------
+#-------------------------------------------------------
+
+disease_risk<-master_risk2%>%
+  #filter(date_valid_for_report==TRUE)%>%
+  left_join(master_cases)%>%
+  mutate(case_ct = case_when(
+    is.na(case_ct)~0,
+    TRUE~case_ct)
+  )%>%
+  mutate(cases_per_adj_days_at_risk = case_ct/(days_in_age_range), 
+         cases_per_animal_at_risk = (case_ct/animals)*100)
+
+#------------------------------
+### cases_per_adj_days_at_risk-----------------------------
+ggplot(disease_risk%>%filter(source_farm %in% c('10', '20', '31', '42')))+
+     # geom_point(aes(x = start_date, y = cases_per_animal_at_risk), color = 'grey40', shape = 8)+
+  geom_smooth(aes(x = start_date, y = cases_per_animal_at_risk, group = source_farm, color = source_farm), span = .3)+
+  geom_vline(xintercept = lubridate::ymd('2024_03_07'), color = 'grey', fill = 'grey')+
+      geom_text(aes(x = lubridate::ymd('2024_03_07'), y = 0, label = 'KDD Vaccine Protocol Change'), 
+                hjust = 0, color = 'grey', vjust = 1, angle = 90)+
+  theme_bw()+
+  labs(title = paste0( dz_name, ' Cases per animal at risk from ', set_age_min, ' to ', set_age_max, ' days of age'), 
+       subtitle = 'Each point represents the risk period of one week',
+       y = paste0('Cases per 100 animals at risk'), 
+       x = 'Calendar Week')+
+  xlim(values = c(min(disease_risk$start_date)+(set_age_max), NA))
+
+
+
+### cases_per animal at risk------------------------
+
+ggplot(disease_risk%>%filter(source_farm %in% c('10', '20', '31', '42')))+
+  #  geom_point(aes(x = start_date, y = cases_per_adj_days_at_risk), color = 'grey40')+
+  geom_smooth(aes(x = start_date, y = cases_per_adj_days_at_risk, group = source_farm, color = source_farm), span = .3)+
+  geom_vline(xintercept = lubridate::ymd('2024_03_07'), color = 'grey', fill = 'grey')+
+      geom_text(aes(x = lubridate::ymd('2024_03_07'), y = 0, label = 'KDD Vaccine Protocol Change'), 
+                hjust = 0, color = 'grey', vjust = 1, angle = 90)+
+
+  theme_bw()+
+  labs(title = paste0( dz_name, ' Cases per days at risk ', set_age_min, ' to ', set_age_max, ' days of age'), 
+       subtitle = 'Each point represents the risk period of one week',
+       y = paste0('Cases per ', days_in_age_range, ' days at risk'), 
+       x = 'Calendar Week')+
+  xlim(values = c(min(disease_risk$start_date)+(set_age_max), NA))
+
+
+# ggplot(disease_risk)+
+#   geom_point(aes(x = start_date, y = days_at_risk))
+# 
+# ggplot(disease_risk)+
+#   geom_point(aes(x = start_date, y = case_ct))
+
+
+```
+
+
+## Disease Incidence - by birth Cohort
+
+In this section disease incidence is calculated at various levels (All KDD Calves, Source Region, Source Farm).  
+These values are calculated with respect to animal birth cohort month to help make confounders such as weather and group disesae pressure more interpretable when comparing source farms.
+
+Animals which have not completed the observation period (are at least `r, paste0(set_max_age )`, days old) are not included because their disease incidence during the period is not known yet.
+
+```{r}
+data_surv_di<-data_surv%>%
+  filter(age_at_pull>set_age_min)%>%
+  filter(age_at_pull>set_age_max)
+
+dz_summary_all<-data_surv_di%>%
+  group_by( birth_cohort_year, birth_cohort_week, birth_cohort_floordate_week)%>%
+  mutate(total_animals = n_distinct(cowid))%>%
+  ungroup()%>%
+  group_by(dz_status,  birth_cohort_year, birth_cohort_week, birth_cohort_floordate_week, total_animals)%>%
+  summarize(ct_animals = n_distinct(cowid))%>%
+  ungroup()%>%
+  mutate(pct = ct_animals/total_animals)%>%
+  mutate(DiseaseIncidence = round(pct*100, digits = 0))%>%
+  filter(dz_status ==TRUE)%>%
+  fxn_rank_dz()
+
+#state---------------------
+dz_summary_state<-data_surv_di%>%
+  group_by(source_state, birth_cohort_year, birth_cohort_week, birth_cohort_floordate_week)%>%
+  mutate(total_animals = n_distinct(cowid))%>%
+  ungroup()%>%
+  group_by(dz_status, source_state, birth_cohort_year, birth_cohort_week, birth_cohort_floordate_week, total_animals)%>%
+  summarize(ct_animals = n_distinct(cowid))%>%
+  ungroup()%>%
+  mutate(pct = ct_animals/total_animals)%>%
+  mutate(DiseaseIncidence = round(pct*100, digits = 0))%>%
+  filter(dz_status ==TRUE)%>%
+  group_by(source_state)%>%
+  fxn_rank_dz()%>%
+  fxn_rank_dz_benchmark()
+
+#farm---------------------
+dz_summary_farm<-data_surv_di%>%
+  group_by(source_farm, source_state, birth_cohort_year, birth_cohort_week, birth_cohort_floordate_week)%>%
+  mutate(total_animals = n_distinct(cowid))%>%
+  ungroup()%>%
+  group_by(dz_status, source_farm, source_state, birth_cohort_year, birth_cohort_week, birth_cohort_floordate_week, total_animals)%>%
+  summarize(ct_animals = n_distinct(cowid))%>%
+  ungroup()%>%
+  mutate(pct = ct_animals/total_animals)%>%
+  mutate(DiseaseIncidence = round(pct*100, digits = 0))%>%
+  filter(dz_status ==TRUE)%>%
+  group_by(source_state, source_farm)%>%
+  fxn_rank_dz()%>%
+  fxn_rank_dz_benchmark()
+
+#write_rds(dz_summary, 'RDS_files/dz_summary_pneu.rds')
+
+#ggplot(dz_summary)+
+ # geom_density(aes(x = age_at_pull))
+
+```
+
+### Disease Incidence - All Animals at KDD
+
+This plot demonstrates the overal trend in disease incidence.  The colored dots indicate the statistical process control rank.  The color makes it more efficient to see patterns in the trend over time. 
+```{r, fig.height=5, fig.width=7}
+
+ggplot(dz_summary_all
+       )+
+    geom_point(aes(x = birth_cohort_floordate_week, y = pct, color = rank_dz_cat), size = 2)+
+  geom_smooth(aes(x = birth_cohort_floordate_week, y = pct, 
+                  ), 
+                 fill = 'grey', color = 'black',
+              span = .5, se=TRUE, alpha = .1)+
+  theme_bw()+
+  ylab(paste0('First Treatment Disease Incidence - ', dz_name))+
+  xlab('Birth Cohort - Month Born')+
+  labs(title = dz_name)+
+  scale_y_continuous(labels = scales::percent)+
+  scale_color_manual(values = colors_rank)+
+  labs(color = '')
+
+
+```
+
+
+
+### Disease Incidence - by State
+
+```{r}
+ggplot(dz_summary_state%>%
+         filter(!(source_state %in% 'Unknown'))
+         #filter(birth_cohort<today())
+       )+
+  geom_point(aes(x = birth_cohort_floordate_week, y = pct, color = source_state))+
+  geom_smooth(aes(x = birth_cohort_floordate_week, y = pct, 
+                  fill = source_state, color = source_state, 
+                  group = source_state), span = .5, se=TRUE, alpha = .1)+
+  theme_bw()+
+  ylab(paste0('First Treatment Disease Incidence - ', dz_name))+
+  xlab('Birth Cohort - Month Born')+
+  labs(title = dz_name)+
+  scale_y_continuous(labels = scales::percent)
+```
+
+
+```{r}
+#facets------------------------------
+ggplot(dz_summary_state%>%
+         filter(!(source_state %in% 'Unknown'))
+         #filter(birth_cohort<today())
+       )+
+    geom_point(aes(x = birth_cohort_floordate_week, y = pct, color = rank_dz_cat), size = 2)+
+  geom_smooth(aes(x = birth_cohort_floordate_week, y = pct, 
+                  #fill = source_state, color = source_state, 
+                  group = source_state), 
+                 fill = 'grey', color = 'black',
+              span = .5, se=TRUE, alpha = .1)+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  ylab(paste0('First Treatment Disease Incidence - ', dz_name))+
+  xlab('Birth Cohort - Month Born')+
+  labs(title = dz_name)+
+  scale_y_continuous(labels = scales::percent)+
+
+  facet_wrap(source_state~.)+
+  
+  scale_color_manual(values = colors_rank)+
+  labs(color = 'Rank Within Farm')
+
+
+
+
+```
+
+
+```{r}
+
+### Disease Incidence - by farm
+list_source_states<-sort(unique(dz_summary_farm$source_state))
+#i=1
+# for (i in seq_along(list_source_states)){
+# p<-ggplot(dz_summary_farm%>%
+#          #filter(!(source_state %in% 'Unknown'))%>%
+#          filter(source_state %in% list_source_states[i])
+#              )+
+#   geom_point(aes(x = birth_cohort_floordate_week, y = pct, color = source_farm))+
+#   geom_smooth(aes(x = birth_cohort_floordate_week, y = pct, 
+#                   fill = source_farm, color = source_farm, 
+#                   group = source_farm), span = .5, se=TRUE, alpha = .1)+
+#   theme_bw()+
+#   ylab(paste0('First Treatment Disease Incidence - ', dz_name))+
+#   xlab('Birth Cohort - Month Born')+
+#   labs(title = dz_name)+
+#   scale_y_continuous(labels = scales::percent)+
+#   facet_wrap(source_state~.)
+# print(p)
+# list_source_states[i]
+# 
+# }
+
+#-----------------------------------------
+
+for (i in seq_along(list_source_states)){
+p<-ggplot(dz_summary_farm%>%
+         #filter(!(source_state %in% 'Unknown'))%>%
+         filter(source_state %in% list_source_states[i])%>%
+           mutate(sample_size = case_when(
+             (total_animals>100)~'>100', 
+             (total_animals>=50)~'50-100', 
+             (total_animals<50)~'<50', 
+          TRUE~as.character(NA)
+          )
+          
+             )%>%
+           mutate(sample_size = factor(sample_size, levels = c('>100', '50-100', '<50')))
+         )+
+  geom_point(aes(x = birth_cohort_floordate_week, y = pct, color = rank_dz_cat, shape = sample_size))+
+  geom_smooth(aes(x = birth_cohort_floordate_week, y = pct, 
+                  #fill = source_farm, color = source_farm, 
+                  group = source_farm), 
+              color = 'black', fill = 'grey', 
+              span = .5, se=TRUE, alpha = .1)+
+  theme_bw()+
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  ylab(paste0('First Treatment Disease Incidence - ', dz_name))+
+  xlab('Birth Cohort - Month Born')+
+  labs(title = paste0(list_source_states[i], ' - ', dz_name, ' by Source Farm'),
+       color = 'Disease Incidence', 
+       shape = 'Sample Size')+
+  scale_y_continuous(labels = scales::percent)+
+  facet_wrap(source_farm~.)+
+  scale_color_manual(values = colors_rank)+
+  scale_fill_manual(values = colors_rank)+
+  scale_shape_manual(values = c('>100' = 19, '50-100' = 8, '<50' = 4))
+
+# print(p)
+# list_source_states[i]
+
+}
+
+#-----------------------------------------
+# list_source_farms<-sort(unique(dz_summary_farm$source_farm))
+#                         
+# for (i in seq_along(list_source_farms)){
+# ggplot(dz_summary_farm%>%
+#          #filter(!(source_state %in% 'Unknown'))%>%
+#          filter(source_farm %in% list_source_farms[i])%>%
+#            mutate(sample_size = case_when(
+#              (total_animals>100)~'>100', 
+#              (total_animals>=50)~'50-100', 
+#              (total_animals<50)~'<50', 
+#           TRUE~as.character(NA)
+#           )
+#           
+#              )%>%
+#            mutate(sample_size = factor(sample_size, levels = c('>100', '50-100', '<50')))
+#          )+
+#   
+#   geom_smooth(aes(x = birth_cohort_floordate_week, y = pct, 
+#                   #fill = source_farm, color = source_farm, 
+#                   group = source_farm), 
+#               color = 'black', fill = 'grey', 
+#               span = .5, se=TRUE, alpha = .1)+
+#     geom_point(aes(x = birth_cohort_floordate_week, y = pct, color = rank_dz_cat, shape = sample_size), size = 2)+
+#   theme_bw()+
+#     theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+#   ylab(paste0('First Treatment Disease Incidence - ', dz_name))+
+#   xlab('Birth Cohort - Month Born')+
+#   labs(title = paste0(list_source_farms[i], ' - ', dz_name, ' by Source Farm'),
+#        color = 'Disease Incidence', 
+#        shape = 'Sample Size')+
+#   scale_y_continuous(labels = scales::percent)+
+#   facet_wrap(source_farm~.)+
+#   scale_color_manual(values = colors_rank)+
+#   scale_fill_manual(values = colors_rank)+
+#   scale_shape_manual(values = c('>100' = 19, '50-100' = 8, '<50' = 4))
+# 
+# ggsave(file = paste0('GraphicOutputs/DiseaseIncidence/', list_source_farms[i], dz_name, '.jpg'))
+# #print(list_source_farms[i])
+# 
+# }
+
+```
+
+### Farm Level Trend Alerts
+
+To create farm level alerts the average within farm trend rank of the most recent 3 birth month cohort groups is calculated for each farm.  This value is then reported as the current farm rank. This method of calculation is robust to outliers and provides an indication of whether each particular farm is trending up or down.
+
+The individual farm trend graphics can be found in the GraphicalOutputs/DiseaseIncidence folder.
+
+```{r}
+dz_dashboard<-dz_summary_farm%>%
+  filter(!(source_state %in% 'Unknown'))%>%
+  group_by(source_state, source_farm)%>%
+  slice_max(birth_cohort_floordate_week, n = 3)%>%
+  summarize(current_trend = mean(rank_dz), 
+            `Disease Incidence` = mean(DiseaseIncidence), 
+            ave_sample_size = round(mean(total_animals), digits = 0), 
+            date_birth_cohort = max(birth_cohort_floordate_week))%>%
+  ungroup()%>%
+  mutate(current_trend_cat = case_when(
+      (current_trend>0.95)~'Very High', 
+      (current_trend>0.80)~'High', 
+      (current_trend>0.20)~'Expected', 
+      (current_trend>0.05)~'Low', 
+      (current_trend<=0.057)~'Very Low', 
+      TRUE~as.character(NA)
+    )
+  )%>%
+  mutate(benchmark_trend = percent_rank(`Disease Incidence`))%>%
+  mutate(benchmark_trend_cat = case_when(
+      (benchmark_trend>0.95)~'Very High', 
+      (benchmark_trend>0.80)~'High', 
+      (benchmark_trend>0.20)~'Expected', 
+      (benchmark_trend>0.05)~'Low', 
+      (benchmark_trend<=0.057)~'Very Low', 
+      TRUE~as.character(NA)
+    ))%>%
+  mutate(benchmark_trend_cat = factor(benchmark_trend_cat, 
+                                      levels = c('Very Low', 'Low', 'Expected', 'High', 'Very High')), 
+         current_trend_cat = factor(current_trend_cat, 
+                                    levels = c('Very Low', 'Low', 'Expected', 'High', 'Very High')))%>%
+  mutate(FarmPercentileRank = round(current_trend*100, digits =0),
+         BenchmarkPercentileRank = round(benchmark_trend*100, digits = 0), 
+         Farm = current_trend_cat, 
+         Benchmark = benchmark_trend_cat
+         )%>%
+  select(source_state, source_farm, `Disease Incidence`, Farm, Benchmark, ave_sample_size, FarmPercentileRank, BenchmarkPercentileRank)%>%
+  arrange(source_state, `Disease Incidence`)%>%
+  rowid_to_column()%>%
+  mutate(ord = rowid)
+  
+  
+#Current Farm Trends-------------------------------------
+
+# ggplot(dz_dashboard)+
+#   geom_bar(aes(x = reorder(source_farm, ord), y = `Disease Incidence`, fill = Farm), stat = 'identity')+
+#   facet_grid(.~source_state, scales = 'free_x', space = 'free')+
+#   scale_color_manual(values = colors_rank)+
+#   scale_fill_manual(values = colors_rank)+
+#   labs(title = paste0('Current Farm Trends - ', dz_name), 
+#        fill = '')
+# 
+
+dz_dashboard_table<-dz_dashboard%>%
+  group_by(source_state, Farm)%>%
+  summarize(farm_list = paste0(source_farm, collapse = ','))%>%
+  ungroup()
+```
+
+
+```{r, height = 5, width = 7}
+ggplot(dz_dashboard)+
+  geom_bar(aes( x = Farm,  fill = Farm),  color = 'white')+
+  # geom_text(data = dz_dashboard%>%filter(!(Farm %in% 'Expected')),
+  #           aes( x = Farm,  y = 1, label = , collapse = ',')),  color = 'white')+
+
+  facet_grid(.~source_state, scales = 'free', space = 'free')+
+  scale_color_manual(values = colors_rank)+
+  scale_fill_manual(values = colors_rank)+
+  labs(title = paste0('Current Farm Trends - ', dz_name), 
+       fill = '')+
+  xlab('Current Farm Trend')+
+  ylab('Count of Farms')
+  
+dz_dashboard_table%>%
+  arrange(Farm, source_state)%>%
+  gt()
+
+```
+
+### Disease Incidence - Benchmarks
+
+Disease incidence is calculated for animals in the most recent 3 birth cohorts. This value is then compared to the other source farms.
+It is important to note the the "alerts" section if farm specific and alerts if a farm is trending up or down compared to that particular farm's history.  This benchmark section ignores farm history and compares farms to each other.
+
+```{r}
+
+#Benchmarks - ordered by rank
+ggplot(dz_dashboard)+
+  geom_bar(aes(x = reorder(source_farm, `Disease Incidence`), y = `Disease Incidence`, fill = Benchmark), 
+           stat = 'identity')+
+  #facet_wrap(source_state~., scales = 'free_x')+
+  geom_text(aes(x = source_farm, y = 0, label = paste0(ave_sample_size)), 
+            color = 'white', angle = 90, hjust = 0, size = rel(2))+
+  scale_color_manual(values = colors_rank)+
+  scale_fill_manual(values = colors_rank)+
+  labs(title = paste0('KDD Benchmark - ', dz_name), 
+       fill = '')+
+  theme_bw()+
+  theme(legend.position = 'top', 
+        axis.text.x = element_text(angle = 45, hjust =1))+
+  xlab('Source Farm')
+
+#Benchmarks - ordered by farm-----------------------------------
+# ggplot(dz_dashboard)+
+#   geom_bar(aes(x = source_farm, y = `Disease Incidence`, fill = Benchmark), 
+#            stat = 'identity')+
+#   #facet_wrap(source_state~., scales = 'free_x')+
+#   geom_text(aes(x = source_farm, y = 0, label = paste0(ave_sample_size)), 
+#             color = 'white', angle = 90, hjust = 0, size = rel(2))+
+#   scale_color_manual(values = colors_rank)+
+#   scale_fill_manual(values = colors_rank)+
+#   labs(title = paste0('KDD Benchmark - ', dz_name), 
+#        fill = '')+
+#   theme_bw()+
+#   theme(legend.position = 'top', 
+#         axis.text.x = element_text(angle = 45, hjust =1))+
+#   xlab('Source Farm')
+
+#Benchmarks - individual farm highlights-----------------------------
+
+list_farms<-sort(unique(dz_dashboard$source_farm))
+                 
+for (i in seq_along(list_farms)){
+#Benchmarks - ordered by rank
+ggplot(dz_dashboard)+
+  geom_bar(aes(x = reorder(source_farm, `Disease Incidence`), y = `Disease Incidence`), 
+           stat = 'identity', fill = 'grey')+
+    geom_bar(data = dz_dashboard%>%filter(source_farm %in% list_farms[i]), 
+             aes(x = reorder(source_farm, `Disease Incidence`), y = `Disease Incidence`, fill = Benchmark), 
+           stat = 'identity')+
+  #facet_wrap(source_state~., scales = 'free_x')+
+  geom_text(data = dz_dashboard%>%filter(source_farm %in% list_farms[i]),
+             aes(x = source_farm, y = 0, label = paste0(ave_sample_size)), 
+            color = 'white', angle = 90, hjust = 0, size = rel(2))+
+  scale_color_manual(values = colors_rank)+
+  scale_fill_manual(values = colors_rank)+
+  labs(title = paste0('KDD Benchmark - ', dz_name, 'Source Farm ', list_farms[i]), 
+       fill = '')+
+  theme_bw()+
+  theme(legend.position = 'top', 
+        axis.text.x = element_text(angle = 45, hjust =1))+
+  xlab('Source Farm')
+  ggsave(file = paste0('Benchmarks/DiseaseBenchmark_', dz_name, '_', list_farms[i], '.jpg'))
+}
+
+```
+
+
+
+
+
+
+
+## Disease Survival Curves 
+
+These curves help compare disease risk over time as animals are coming and going for other reasons
+
+### Compare Source States
+```{r}
+#-----------------------------------
+survfit2(Surv(dz_time, dz_status) ~ source_state, 
+         data = data_surv%>%
+           filter(dz_time>0)%>%
+           filter(birth_cohort_year>set_years_of_history)#%>%
+            #mutate(age_at_pull = pull_date-bdat)%>%
+            #filter(age_at_pull>set_age_min)%>%
+            #filter(age_at_pull>set_age_max)
+         ) |>
+  ggsurvfit(type = 'risk', linewidth = 1) +
+  add_confidence_interval() +
+  add_risktable(#risktable_stats = 'n.risk', 
+                risktable_stats = "{n.risk} ({cum.event})",
+               # risktable_group = 'auto',
+                risktable_height = .3, 
+                size = 2
+                ) +
+  add_risktable_strata_symbol()+
+  # add_quantile(y_value = 0.9, #color = "gray50",
+  #              linewidth = 0.75) +
+  #add_censor_mark()+
+  scale_ggsurvfit()+
+  coord_cartesian(xlim = c(set_age_min, set_age_max), 
+                  ylim = c(NA, NA))+
+  labs(title = paste0('Risk of ', dz_name, ' From ',  set_age_min, ' to ', set_age_max, ' Days of Age'),
+       y = paste0('Probability of ', dz_name)
+       )+
+
+  theme_bw()+
+  theme(legend.position = 'right')
+
+  
+ggsave(file = paste0('GraphicOutputs/DiseaseSurvivalCurves/', dz_name, set_age_min, ' to ', set_age_max, 'source_state.jpg'))
+
+
+
+```
+
+### Compare Birth Years
+
+```{r}
+#-----------------------------------
+survfit2(Surv(dz_time, dz_status) ~ birth_cohort_year, 
+         data = data_surv%>%
+           filter(dz_time>0)%>%
+           filter(birth_cohort_year>set_years_of_history)#%>%
+            #mutate(age_at_pull = pull_date-bdat)%>%
+            #filter(age_at_pull>set_age_min)%>%
+            #filter(age_at_pull>set_age_max)
+         ) |>
+  ggsurvfit(type = 'risk', linewidth = 1) +
+  add_confidence_interval() +
+  add_risktable(#risktable_stats = 'n.risk', 
+                risktable_stats = "{n.risk} ({cum.event})",
+               # risktable_group = 'auto',
+                risktable_height = .3, 
+                size = 2
+                ) +
+  add_risktable_strata_symbol()+
+  # add_quantile(y_value = 0.9, #color = "gray50",
+  #              linewidth = 0.75) +
+  #add_censor_mark()+
+  scale_ggsurvfit()+
+  coord_cartesian(xlim = c(set_age_min, set_age_max), 
+                  ylim = c(NA, NA))+
+  labs(title = paste0('Risk of ', dz_name, ' From ',  set_age_min, ' to ', set_age_max, ' Days of Age'),
+       y = paste0('Probability of ', dz_name)
+       )+
+
+  theme_bw()+
+  theme(legend.position = 'right', 
+        color = 'Birth Cohort Year')
+
+  
+ggsave(file = paste0('GraphicOutputs/DiseaseSurvivalCurves/BirthCohortYear',  dz_name, set_age_min, ' to ', set_age_max,  'birth_cohort_year.jpg'))
+
+#by state-----------------------
+
+list_source_farms<-sort(unique(data_surv$source_farm))
+  
+#i=1
+for (i in seq_along(list_source_farms)){
+  
+survfit2(Surv(dz_time, dz_status) ~ farm_highlight, 
+         data = data_surv%>%
+           filter(dz_time>0)%>%
+           filter(birth_cohort_year>set_years_of_history)%>%
+           mutate(farm_highlight = case_when(
+             (source_farm %in% list_source_farms[i])~ paste0('Farm ', list_source_farms[i]),
+             TRUE~'Other KDD Animals')
+             )%>%
+            #mutate(age_at_pull = pull_date-bdat)%>%
+            #filter(age_at_pull>set_age_min)%>%
+            filter(age_at_pull>set_age_max)
+         ) |>
+  ggsurvfit(type = 'risk', linewidth = 1) +
+  add_confidence_interval() +
+  add_risktable(#risktable_stats = 'n.risk', 
+                risktable_stats = "{n.risk} ({cum.event})",
+               # risktable_group = 'auto',
+                risktable_height = .3, 
+                size = 2
+                ) +
+  add_risktable_strata_symbol()+
+  # add_quantile(y_value = 0.9, #color = "gray50",
+  #              linewidth = 0.75) +
+  #add_censor_mark()+
+  scale_ggsurvfit()+
+  coord_cartesian(xlim = c(set_age_min, set_age_max), 
+                  ylim = c(NA, NA))+
+  labs(title = paste0('Risk of ', dz_name, ' From ',  set_age_min, ' to ', set_age_max, ' Days of Age'),
+       y = paste0('Probability of ', dz_name)
+       )+
+
+  theme_bw()+
+  theme(legend.position = 'top', 
+        color = 'Birth Cohort Year')+
+    scale_color_manual(values = c('red', 'black'))+
+    scale_fill_manual(values = c('red', 'black'))
+  
+
+  
+ggsave(file = paste0('GraphicOutputs/DiseaseSurvivalCurves/Benchmark',  list_source_farms[i], dz_name, set_age_min, ' to ', set_age_max,  'benchmark.jpg'))
+
+}
+
+
+#i=2
+# for (i in seq_along(list_source_farms)){
+#   
+# survfit2(Surv(dz_time, dz_status) ~ birth_cohort_year, 
+#          data = data_surv%>%
+#            filter(dz_time>0)%>%
+#            filter(birth_cohort_year>set_years_of_history)%>%
+#            filter(source_farm %in% list_source_farms[i])%>%
+#             filter(age_at_pull>set_age_max)
+#          ) |>
+#   ggsurvfit(type = 'risk', linewidth = 1) +
+#   add_confidence_interval() +
+#   add_risktable(#risktable_stats = 'n.risk', 
+#                 risktable_stats = "{n.risk} ({cum.event})",
+#                # risktable_group = 'auto',
+#                 risktable_height = .3, 
+#                 size = 2
+#                 ) +
+#   add_risktable_strata_symbol()+
+#   # add_quantile(y_value = 0.9, #color = "gray50",
+#   #              linewidth = 0.75) +
+#   #add_censor_mark()+
+#   scale_ggsurvfit()+
+#   coord_cartesian(xlim = c(set_age_min, set_age_max), 
+#                   ylim = c(NA, NA))+
+#   labs(title = paste0('Risk of ', dz_name, ' From ',  set_age_min, ' to ', set_age_max, ' Days of Age'),
+#        y = paste0('Probability of ', dz_name)
+#        )+
+# 
+#   theme_bw()+
+#   theme(legend.position = 'top', 
+#         color = 'Birth Cohort Year')
+#   
+# 
+#  
+# ggsave(file = paste0('GraphicOutputs/DiseaseSurvivalCurves/BirthCohortYear',  list_source_farms[i], dz_name, set_age_min, ' to ', set_age_max,  'birth_cohort_year.jpg'))
+# 
+#  paste0(list_source_farms[i])
+# 
+# }
+
+
+```
+
+### Compare Birth Months for the last year
+```{r}
+
+library(grDevices) 
+
+# Define your start and end colors 
+start_color <- "yellow" 
+end_color <- "blue" 
+
+# Create a color palette with 12 distinct colors
+my_palette <- colorRampPalette(c(start_color, end_color))(12) 
+
+# Print the color palette
+print(my_palette) 
+
+my_palette<-colorRampPalette(c("grey90", "black"))(12)
+
+           
+
+colors_cohort_birth_season<-c("2021-06-01" = "#E5E5E5", 
+                              "2021-09-01" = "#D0D0D0",
+                              "2021-12-01" = "#BBBBBB",
+                              "2022-03-01" = "#A6A6A6", 
+                              "2022-06-01" = "yellow",
+                              "2022-09-01" = "#7C7C7C",
+                              "2022-12-01" =  "#686868", 
+                              "2023-03-01" = "#535353",
+                              "2023-06-01" = "orange",
+                              "2023-09-01" = "#292929",
+                              "2023-12-01" = "#141414",
+                              "2024-03-01" = "blue", 
+                              "2024-06-01" = 'red')
+
+#-----------------------------------
+survfit2(Surv(dz_time, dz_status) ~ cohort_birth_season, 
+         data = data_surv%>%
+           filter(dz_time>0)%>%
+           filter(birth_cohort_year>set_years_of_history)
+            #mutate(age_at_pull = pull_date-bdat)%>%
+            #filter(age_at_pull>set_age_min)%>%
+            #filter(age_at_pull>set_age_max)
+         ) |>
+  ggsurvfit(type = 'risk', linewidth = 1) +
+  add_confidence_interval() +
+  add_risktable(#risktable_stats = 'n.risk', 
+                risktable_stats = "{n.risk} ({cum.event})",
+               # risktable_group = 'auto',
+                risktable_height = .3, 
+                size = 2
+                ) +
+  add_risktable_strata_symbol()+
+  # add_quantile(y_value = 0.9, #color = "gray50",
+  #              linewidth = 0.75) +
+  #add_censor_mark()+
+  scale_ggsurvfit()+
+  coord_cartesian(xlim = c(set_age_min, set_age_max), 
+                  ylim = c(NA, NA))+
+  labs(title = paste0('Seasonal Risk of ', dz_name, ' From ',  set_age_min, ' to ', set_age_max, ' Days of Age'),
+       y = paste0('Probability of ', dz_name)
+       )+
+
+  theme_bw()+
+  theme(legend.position = 'right', 
+        color = 'Birth Cohort Month')+
+  scale_color_manual(values = colors_cohort_birth_season)+
+  scale_fill_manual(values = colors_cohort_birth_season)
+
+  
+ggsave(file = paste0('GraphicOutputs/DiseaseSurvivalCurves/',  dz_name, set_age_min, ' to ', set_age_max,  'birth_cohort_week.jpg'))
+
+
+
+```
+
+## Clinical Questions 
+
+### New KDD vaccine protocol
+
+KDD implemented a new vaccine protocol on March 7, 2024.  It is challenging to use observational data without any controls to notice a change between the vaccine protocols.  Performance (gain) is where it might be most noticeable, this is evaluated in a separate section.  This sections looks for a change in disease timing or incidence.  
+
+Interpretation of this graphic must made cautiously as it is really a comparison of 2 separate populations, those at risk prior to the vaccine change, and those at risk afterwards.  Seasonal changes, source farm changes, and many other confounders make this very difficult to interpret. 
+For this reason the results are displayed with multiple time frames from previous years. This can be compared to the expected change in disease incidence rate over time.
+
+
+```{r}
+bdate_vac_new<-lubridate::ymd('2024-03-07')
+
+bdate_vac_transition<-bdate_vac_new-75
+bdate_vac_old<-bdate_vac_transition-365
+
+bdate_wisconsin_new<-lubridate::ymd('2024-04-01')
+
+
+df_vac_protocol<-data_surv%>%
+  filter(dz_time>0)%>%
+  mutate(VacProtocol = case_when(
+    (bdat>bdate_vac_new)~'New', #(Stem-39, Stem-60, Probac3-74)
+    (bdat>bdate_vac_transition)~'Transition', 
+    (bdat>bdate_vac_old)~'Old', #(Pyr5-21, Pyr5-42, Nas3-50, Nas3-75)
+    (bdat>(bdate_vac_old-800))~'Very Old',
+    is.na(bdat)~'Unknown', 
+    TRUE~'PreHistoric')
+  )%>%
+  mutate(WI_new = case_when(
+    ((source_state =='Wisconsin')&(bdat>bdate_wisconsin_new))~'WI New', 
+    ((source_state == 'Wisconsin')&(bdat<=bdate_wisconsin_new))~'WI Old', 
+
+    (bdat>bdate_wisconsin_new)~'Other Location New', 
+    (bdat<=bdate_wisconsin_new)~'Other Location Old',
+    TRUE~'Unknown')
+    )
+```
+
+
+```{r}
+#-----------------------------------
+survfit2(Surv(dz_time, dz_status) ~ VacProtocol, 
+         data = df_vac_protocol
+         ) |>
+  ggsurvfit(type = 'risk', linewidth = 1) +
+  add_confidence_interval() +
+  #add_risktable() +
+  add_risktable(
+    size = 1.5,
+    risktable_stats = "{n.risk} ({cum.event})"
+  )+
+  # add_quantile(y_value = 0.9, #color = "gray50",
+  #              linewidth = 0.75) +
+  scale_ggsurvfit()+
+  coord_cartesian(xlim = c(0, set_age_max), 
+                  ylim = c(NA, NA))+
+  labs(title = paste0(dz_name, ' by Vaccination Protocol'))+
+  scale_color_manual(values = c('New' = 'red', 'Old' = 'black', 'PreHistoric' = 'grey', 'Very Old' = 'grey40', 'Transition' = 'blue' ))+
+  scale_fill_manual(values = c('New' = 'red', 'Old' = 'black', 'PreHistoric' = 'grey', 'Very Old' = 'grey40', 'Transition' = 'blue' ))
+
+#----------------------------------------------
+#-----------------------------------
+survfit2(Surv(dz_time, dz_status) ~ cohort_birth_season, 
+         data = df_vac_protocol
+         ) |>
+  ggsurvfit(type = 'risk', linewidth = 1) +
+  add_confidence_interval() +
+  #add_risktable() +
+  add_risktable(
+    size = 1.5,
+    risktable_stats = "{n.risk} ({cum.event})"
+  )+
+  # add_quantile(y_value = 0.9, #color = "gray50",
+  #              linewidth = 0.75) +
+  scale_ggsurvfit()+
+  coord_cartesian(xlim = c(0, set_age_max), 
+                  ylim = c(NA, NA))+
+  labs(title = paste0(dz_name, ' by Vaccination Protocol'))+
+  scale_color_manual(values = c("2021-09-01" = 'grey',
+                                "2021-12-01" = 'grey',
+                                "2022-03-01" = 'cyan',
+                                "2022-06-01" = 'pink',
+                                "2022-09-01" = 'grey',
+                                "2022-12-01" = 'grey',
+                                "2023-03-01" = 'cyan',
+                                "2023-06-01" = 'pink',
+                                "2023-09-01" = 'grey',
+                                "2023-12-01" = 'grey',
+                                "2024-03-01" = 'blue',
+                                "2024-06-01" = 'red'))+
+  scale_fill_manual(values = c("2021-09-01" = 'grey',
+                                "2021-12-01" = 'grey',
+                                "2022-03-01" = 'cyan',
+                                "2022-06-01" = 'pink',
+                                "2022-09-01" = 'grey',
+                                "2022-12-01" = 'grey',
+                                "2023-03-01" = 'cyan',
+                                "2023-06-01" = 'pink',
+                                "2023-09-01" = 'grey',
+                                "2023-12-01" = 'grey',
+                                "2024-03-01" = 'blue',
+                                "2024-06-01" = 'red'))+
+  theme(legend.position = 'right')
+
+```
+
+
+
+### New Wisconsin Protocol
+
+```{r}
+survfit2(Surv(dz_time, dz_status) ~ WI_new, 
+         data = df_vac_protocol
+         ) |>
+  ggsurvfit(type = 'risk', linewidth = 1) +
+  add_confidence_interval() +
+  #add_risktable() +
+  add_risktable(
+    size = 1.5,
+    risktable_stats = "{n.risk} ({cum.event})"
+  )+
+  # add_quantile(y_value = 0.9, #color = "gray50",
+  #              linewidth = 0.75) +
+  scale_ggsurvfit()+
+  coord_cartesian(xlim = c(0, set_age_max), 
+                  ylim = c(NA, NA))+
+  labs(title = paste0(dz_name, ' by Wisconsin Vaccination Protocol'))+
+  scale_color_manual(values = c('WI New' = 'red', 'WI Old' = 'orange', 'Other Location New' = 'black', 'Other Location Old' = 'grey40' ))+
+  scale_fill_manual(values = c('WI New' = 'red', 'WI Old' = 'orange', 'Other Location New' = 'black', 'Other Location Old' = 'grey40' ))
+  
+
+
+
+```
+

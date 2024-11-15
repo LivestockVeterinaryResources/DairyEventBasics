@@ -1,0 +1,331 @@
+---
+title: "Explore Outcomes"
+output: html_document
+date: "2024-08-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+
+
+```
+Some interesting questions:
+1) Calves that are given an ASSIST protocol with a remark of TUL.3.1 were given tulathromycin. This is given at the discretion of my transition managers. It’s not quite metaphylaxis but the guys view these calves as high risk. I’d love to understand how these calves perform though the system
+
+
+2)First-pull recovery rate. Current we are using enro for first pull. I’d curious to know what our recover rate is
+
+
+```{r}
+list_files<-list.files('KDDEvents')
+
+events<-NULL
+
+for (i in seq_along(list_files)){
+  df<-read_csv(paste0('KDDEvents/', list_files[i]), col_types = cols(.default = 'c'))
+  events<-bind_rows(events, df)
+}
+```
+
+```{r}
+#--------------------------------------------------
+
+events2<-events%>%
+  #basid---------------------------------------
+  mutate(cowid = paste0(ID, BDAT, EID))%>%
+  mutate(date = lubridate::mdy(Date), 
+         edat = lubridate::mdy(EDAT), 
+         bdat = lubridate::mdy(BDAT))%>%
+  mutate(floor_date_month = floor_date(date, unit = 'month'))%>%
+  group_by(ID, cowid, bdat)%>%
+  mutate(max_events = sum(n()))%>%
+  ungroup()%>%
+  #filter(max_events>81)%>%#test calvf
+  #filter(ID %in% "10028537")%>%
+  
+  arrange(date)%>%
+  distinct()%>%
+  
+  #define event type------------------------------------
+  mutate(EVT_type = case_when(
+  Event %in% c("ABORT","BRED", "BULLPEN", "FMARTIN", "GNRH", "HEAT", "MV2AI", 
+               "OK",      "OPEN", "PREG", "PREV", "PROST", "RECHK" )~'repro', 
+  Event %in% c ("BLOAT", "DIPTHRA", "FEVER", "HLTHSCR", "ILLMISC", "INDIG", "INJURY", 
+                "LAME", "MAST", "NAVEL", "OTHER","OTITIS",  "PINKEYE", "PNEU", "RP", 
+                "SCOURS",  "SEPTIC", "SWLNLEG")~'health', 
+  Event %in% c("ARVDPOT", "DNB", "DRY", "GOAMISH", "GODEER", "GOHOME", "MEASURE", "MOVE")~'mgmt', 
+  Event %in% c("ARVKDD", "BEEF", "DIED", "FRESH", "SOLD")~'param', 
+  Event %in% c("ASSIST", "CHECK", "CHKDBN", "CLFSERU", "COMMENT", "INV", "INWEIGH", "OBSERVE", "TBTEST",  "TP", 
+               "TRIAL", "USER6", "USER7", "VACC", "XID", "ZPRBRED")~'ask', 
+    Event %in% c("BANGVAC")~'vac', 
+  TRUE~'Unknown'
+   ))%>%
+  #count events ----------------------
+  group_by(cowid, Event)%>%
+  mutate(event_ct = 1:n())%>%
+  ungroup()%>%
+  group_by(cowid, Event)%>%
+  mutate(max_event_ct = max(event_ct))%>%
+  ungroup()%>%
+  group_by(cowid)%>%
+  mutate(list_params = paste0(unique(Event), collapse = ','))%>%
+  ungroup()%>%
+  mutate(outcome_basic = case_when(
+    (event_ct < max_event_ct)~'Retreat', 
+    (max_event_ct==1)~'Success',
+    TRUE~'Other'
+  ))
+
+
+
+
+  
+```
+
+
+
+
+
+```{r}
+
+# ggplot(events2)+
+#   geom_point(aes(x = date, y = Event, color = EVT_type))
+
+```
+
+
+
+```{r}
+event_counts<-events2%>%
+  group_by(EVT_type, Event, floor_date_month)%>%
+  summarize(ct_cowid = n_distinct(cowid))%>%
+  ungroup()
+
+ggplot(event_counts%>%filter(EVT_type %in% 'health')%>%
+         filter(!(Event %in% c('RP',  'ILLMISC', 'INJURY', 'INDIG', 'MAST', 'SWLNLEG', 'FEVER', 'DIPTHRA'))))+
+  geom_point(aes(x = floor_date_month, y = ct_cowid, color = Event))+
+    geom_smooth(aes(x = floor_date_month, y = ct_cowid, color = Event, fill = Event, group = Event))#+
+
+  #facet_wrap(Event~., scales = 'free')
+
+
+```
+
+
+```{r}
+
+remarks<-events2%>%
+  #filter(Event %in% 'PNEU')%>%
+  filter(event_ct==1)%>%
+  group_by(Event, floor_date_month)%>%
+  mutate(total_cowid = n_distinct(cowid), 
+            total_row = sum(n()))%>%
+  ungroup()%>%
+  mutate(Remark_simple = str_sub(Remark, 1,3), collapse = ',')%>%
+  mutate(
+    draxxin = case_when(
+      str_detect(Remark, 'DRA.|DRX.')~'tulathromycin', 
+      TRUE~''), 
+    baytril = case_when(
+      str_detect(Remark, 'BAY.|ENR.')~'enrofloxacin', 
+      TRUE~''), 
+    excenel = case_when(
+      str_detect(Remark, 'EXN.|EXL.|XNL.')~'ceftiofur hcl', 
+      TRUE~''), 
+    ampicillin = case_when(
+      str_detect(Remark, 'AMP.|PF.|PLY.|POL.')~'ampicillin', 
+      TRUE~''), 
+    excede = case_when(
+      str_detect(Remark, 'EXD.|EXC.')~'ceftiofur cfa', 
+      TRUE~''), 
+    nuflor = case_when(
+      str_detect(Remark, 'NU.|RES.|NOR.')~'florfenicol', 
+      TRUE~''), 
+    zuprevo = case_when(
+      str_detect(Remark, 'ZUP.')~'tildipirison', 
+      TRUE~''),
+    zactran = case_when(
+      str_detect(Remark, 'ZAC.')~'gamithromycin', 
+      TRUE~''), 
+    oxytet = case_when(
+      str_detect(Remark, 'OXY.|LA2.|TET.|LAT.|LA.')~'oxytetracycline', 
+      TRUE~''), 
+    sulf = case_when(
+      str_detect(Remark, 'SMZ.')~'sulfa', 
+      TRUE~''),
+    pen = case_when(
+      str_detect(Remark, 'PEN.')~'penicillin', 
+      TRUE~''), 
+    elect = case_when(
+      str_detect(Remark, 'ELEC.|ELE.|LRS.')~'electrolytes', 
+      TRUE~''), 
+    ban = case_when(
+      str_detect(Remark, 'BAN.')~'flunixin', 
+      TRUE~''), 
+    thera = case_when(
+      str_detect(Remark, 'TH.')~'therabloat', 
+      TRUE~''),
+    dex = case_when(
+      str_detect(Remark, 'DEX.|DEX')~'dexamethazone', 
+      TRUE~'')
+    )%>%
+  mutate(Treatment = case_when(
+    (EVT_type %in% 'health')~str_c(draxxin, baytril, excenel, ampicillin, excede, nuflor, zuprevo, zactran, oxytet, sulf, pen, ban, elect, thera, dex,  sep = ''), 
+    TRUE~'NONE'))%>%
+  mutate(Treatment = case_when(
+    (Treatment %in% '')~'other', 
+    TRUE~Treatment
+  ))%>%
+
+# test<-remarks%>%
+#   filter(Treatment %in% 'Other')%>%
+#   group_by(Event, Remark)%>%
+#   summarize(ct_row = sum(n()))%>%
+#   ungroup()
+#%>%
+    group_by(Event, Treatment, floor_date_month, total_cowid, total_row)%>%
+
+  #group_by(Event, Remark_simple, floor_date_month, total_cowid, total_row)%>%
+  summarize(ct_cowid = n_distinct(cowid), 
+            ct_row = sum(n()))%>%
+  ungroup()%>%
+  mutate(pct = round((ct_cowid/total_cowid)*100, digits = 0))
+
+
+outcomes<-events2%>%
+  #filter(Event %in% 'PNEU')%>%
+  filter(event_ct==1)%>%
+  group_by(Event, floor_date_month)%>%
+  mutate(total_cowid = n_distinct(cowid), 
+            total_row = sum(n()))%>%
+  ungroup()%>%
+  group_by(Event, outcome_basic, floor_date_month, total_cowid, total_row)%>%
+  summarize(ct_cowid = n_distinct(cowid), 
+            ct_row = sum(n()), 
+            list_remarks = paste0(sort(unique(str_sub(Remark, 1,4))), collapse = ','))%>%
+  ungroup()%>%
+  mutate(pct = round((ct_cowid/total_cowid)*100, digits = 0))
+  
+ggplot(outcomes%>%
+         filter(Event %in% 'PNEU')%>%
+         filter(outcome_basic == 'Success'))+
+  geom_bar(data = remarks%>%
+         filter(Event %in% 'PNEU'), 
+           aes(x = floor_date_month, y = pct, fill = Treatment ), stat = 'identity')+
+  geom_vline(xintercept = floor_date(events2$date, unit = 'year'), linetype = 'dashed', color = 'grey')+
+  geom_hline(yintercept = 70, color = 'grey')+
+  geom_text(aes(x = min(events2$floor_date_month, na.rm = T), y = 70, label = 'Target'),vjust = 0, hjust = 0, color = 'grey')+
+
+  geom_point(aes(x = floor_date_month, y = pct))+
+  geom_smooth(data = outcomes%>%
+         filter(Event %in% c('PNEU'))%>%
+         filter(outcome_basic == 'Success')%>%
+           filter(floor_date_month<lubridate::ymd('2024-7-1')),
+                  aes(x = floor_date_month, y = pct), span = .3, color = 'black')+
+  
+  #facet_wrap(Event~., scales = 'free')+
+  theme_bw()+
+  ylim(c(0,100))+
+  xlab('Date')+
+  labs(title = 'Monthly 1st Treatment Success Rate')
+  
+  remarks2<-events2%>%
+    filter(Event %in% 'PNEU')%>%
+    filter(event_ct ==1)%>%
+    group_by((Remark))%>%
+    summarize(ct = sum(n()))%>%
+    ungroup()
+  
+  table(remarks2$Remark_simple)
+  
+  sort(unique(remarks2$Remark))
+
+```
+
+# Calf list
+
+```{r}
+calf_list<-events2%>%
+  mutate(
+    assist = case_when(
+    (Event=='ASSIST')~date, 
+    TRUE~lubridate::mdy('')
+    ), 
+    died = case_when(
+    (Event=='DIED')~date, 
+    TRUE~lubridate::mdy('')
+    )
+    )%>%
+  group_by(cowid, ID, EID, bdat)%>%
+  summarise(date_in = min(date), 
+            date_out = max(date), 
+            list_events = paste0(sort(unique(Event)), collapse = ','), 
+            assist_date = lubridate::ymd(paste0(unique(assist), collapse = ',' )), 
+            died_date = lubridate::ymd(paste0(unique(died), collapse = ','))
+            )%>%
+  ungroup()%>%
+  mutate(dof = as.numeric(date_out-date_in),
+         age_assist = assist_date-bdat, 
+         age_died = died_date-bdat)%>%
+  mutate(age_in = bdat-date_in, 
+         age_out = date_out-bdat)%>%
+  mutate(cohort_year = year(date_in), 
+         cohort_month = floor_date(date_in, unit = 'month'))
+
+
+```
+
+#health events
+```{r}
+health_events<-events2%>%
+  filter((EVT_type %in% 'health')|(Event %in% 'DIED'))%>%
+  group_by(cowid, ID, EID, bdat, Event, max_event_ct)%>%
+  summarize(date_start = min(date), 
+            date_end = max(date) 
+            )%>%
+  ungroup()%>%
+  mutate(event_durration = date_end-date_start, 
+         age_at_event_start = date_start-bdat, 
+         age_at_event_end = date_end-bdat)
+
+health_events_start<-health_events%>%
+  mutate(EventStart = paste0(Event, '_start'), 
+         EventEnd = paste0(Event, '_end'))%>%
+    mutate(list_health = paste0(sort(unique(Event)), collapse = ','))%>%
+  select(cowid, ID, EID, bdat, list_health, EventStart, date_start)%>%
+  pivot_wider(names_from = EventStart, 
+              values_from = date_start)
+  
+
+table(health_events_start$EventCombos
+      )
+  
+```
+
+
+```{r}
+ggplot(calf_list)+
+  geom_density(aes(x = dof))
+
+ggplot(calf_list)+
+  geom_density(aes(x = age_in))
+
+ggplot(calf_list)+
+  geom_density(aes(x = age_out))+
+  coord_cartesian(xlim = c(0, NA))
+
+ggplot(calf_list)+
+  geom_density(aes(x = date_in))
+
+ggplot(calf_list)+
+  geom_density(aes(x = date_out))
+
+ggplot(calf_list)+
+  geom_bar(aes(x = date_in))
+```
+
+
