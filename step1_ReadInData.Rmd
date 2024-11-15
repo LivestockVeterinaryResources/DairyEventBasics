@@ -1,0 +1,98 @@
+---
+title: "Read in Initial Data"
+output: html_document
+date: "2024-08-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#setup
+```{r}
+library(tidyverse)
+source('FUNCTIONS/fxn_sourcefarms.R') #function that parses cow id to identify source farm
+
+```
+
+#read in event files
+```{r}
+
+#Pull events from dairy comp using this code
+#Option 1 Pull 5 years in one file: EVENTS\2S2000C #1 #2 #4 #5 #6 #11 #12 #13 #15 #28 #29 #30 #31 #32 #38 #40 #43
+#Option 2 pull smaller time frames using "days back" starting with "S""days back" and ending with "L""days back": EVENTS\2S99L0C #1 #2 #4 #5 #6 #11 #12 #13 #15 #28 #29 #30 #31 #32 #38 #40 #43
+
+
+list_files<-list.files('Data/EventFiles') #folder name where event files are located
+
+events<-NULL
+
+for (i in seq_along(list_files)){
+  df<-read_csv(paste0('Data/EventFiles/', list_files[i]), col_types = cols(.default = 'c'))%>% #reads in all data as character string
+    mutate(Remark = str_replace_all(Remark, "[^[:alnum:]]", "_")) #gets rid of weird characters that mess up encoding or parsing
+    
+  events<-bind_rows(events, df)
+}
+
+```
+#initial cleanup
+```{r}
+events2<-events%>%
+  filter(!(is.na(Date)))%>%
+  select(-starts_with('...'))%>% #git rid of extra columns
+  #base id--------------------------------------- 
+  mutate(cowid = paste0(ID, BDAT), 
+         breed = CBRD)%>%
+  #format date--------------------------------------- 
+  mutate(abdat = lubridate::mdy(ABDAT),
+         ardat = lubridate::mdy(ARDAT),
+         bdat = lubridate::mdy(BDAT), 
+         cdat = lubridate::mdy(CDAT), 
+         date = lubridate::mdy(Date), 
+         ddat = lubridate::mdy(DDAT),
+         edat = lubridate::mdy(EDAT), 
+         fdat = lubridate::mdy(FDAT), 
+         hdat = lubridate::mdy(HDAT),
+         podat = lubridate::mdy(PODAT)
+         )%>%
+  mutate(DIM = parse_number(DIM))%>%
+  arrange(cowid, date)%>%
+  distinct()%>%
+  
+  #define event types------------------------------------
+  mutate(EVT_type = case_when(
+  Event %in% c("ABORT","BRED", "BULLPEN", "FMARTIN", "GNRH", "HEAT", "MV2AI", 
+               "OK",      "OPEN", "PREG", "PREV", "PROST", "RECHK" )~'repro', 
+  Event %in% c ("ASSIST", "BLOAT", "DIPTHRA", "FEVER", "HLTHSCR", "ILLMISC", "INDIG", "INJURY", 
+                "LAME", "MAST", "NAVEL", "OTHER","OTITIS",  "PINKEYE", "PNEU", "RP", 
+                "SCOURS",  "SEPTIC", "SWLNLEG")~'health', 
+  Event %in% c("ARVDPOT", "DNB", "DRY", "GOAMISH", "GODEER", "GOHOME",  "MOVE")~'mgmt', 
+  Event %in% c("ARVKDD", "BEEF", "DIED", "FRESH", "SOLD")~'param', 
+  Event %in% c("INWEIGH", "MEASURE", "TP")~'measure',
+  Event %in% c("CHECK", "CHKDBN", "CLFSERU", "COMMENT", "INV",  "OBSERVE", "TBTEST",  
+               "TRIAL", "USER6", "USER7",  "XID", "ZPRBRED")~'ask', 
+    Event %in% c("BANGVAC", "VACC")~'vac', 
+  TRUE~'Unknown'
+   ))%>%
+  
+
+  #add source farm ------------------
+  
+  fxn_add_source_farm() #this function adds source farm and is specific to the farms in the data set, not a universal function
+```
+
+#write out final file 
+
+```{r}
+
+
+write_rds(events2, 'Data/IntermediateFiles/events2.rds')
+
+  
+```
+
+
+
+
+
+

@@ -1,0 +1,190 @@
+---
+title: "Explore Outcomes"
+output: html_document
+date: "2024-08-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+
+source('FUNCTIONS/fxn_lag_master.R')
+
+
+```
+
+#read in file
+```{r}
+events2<-read_rds('Data/IntermediateFiles/events2.rds')%>%
+  filter(!(is.na(bdat)))%>% 
+  mutate(data_pull_date = max(date, na.rm = TRUE))%>%
+  mutate(data_pull_date = max(date, na.rm = TRUE))%>%
+  mutate(
+    breed = case_when(
+      is.na(breed)~'Unkown', 
+      TRUE~breed), 
+    source_farm = case_when(
+      is.na(source_farm)~'Unknown', 
+      TRUE~source_farm), 
+    source_state = case_when(
+      is.na(source_state)~'Unknown',
+      TRUE~source_state)
+          )%>%
+  rowid_to_column()#%>%
+  #filter(cowid %in% '9301260606/24/23')
+ # filter(cowid %in% c('1200230604/04/19',
+ #                     "100006308/30/17",  "100011309/17/17",  "100012509/24/17",
+ #                     "1000743503/20/22", "1000750204/01/22", "1000755104/10/22", "1000756304/12/22"))
+ 
+pull_date<-max(events2$date)
+```
+
+#animals and important dates
+```{r}
+animals<-events2%>%
+  group_by(cowid, bdat, source_farm, source_state, data_pull_date
+         )%>%
+  summarize(breed = paste0(sort(unique(breed)), collapse = ','))%>%
+  ungroup()%>%
+  mutate(cohort_birth_month = floor_date(bdat, unit = 'months'), 
+         cohort_birth_season = floor_date(bdat, unit = 'seasons'))
+  
+
+deads<-events2%>%
+  filter(Event == 'DIED')%>%
+  group_by(cowid)%>%
+  summarize(date_died = min(date), 
+            date_died_max = max(date))%>%
+  distinct()%>%
+  mutate(date_died_diff = as.numeric(date_died_max-date_died))
+
+
+
+
+solds<-events2%>%
+  filter(Event == 'SOLD')%>%
+  group_by(cowid)%>%
+  summarize(date_sold = min(date), 
+            date_sold_max = max(date))%>%
+  distinct()%>%
+  mutate(date_sold_diff = as.numeric(date_sold_max-date_sold))
+
+arrives_pot<-events2%>%
+  filter(Event == 'ARVDPOT')%>%
+  group_by(cowid)%>%
+  summarize(date_arrived_pot = min(date), 
+            date_arrived_pot_max = max(date))%>%
+  distinct()%>%
+  mutate(date_arrived_pot_diff = as.numeric(date_arrived_pot_max-date_arrived_pot))
+
+
+arrives_kdd<-events2%>%
+  filter(Event == "ARVKDD")%>%
+  group_by(cowid)%>%
+  summarize(date_arrived_kdd = min(date), 
+            date_arrived_kdd_max = max(date))%>%
+  distinct()%>%
+  mutate(date_arrived_kdd_diff = as.numeric(date_arrived_kdd_max-date_arrived_kdd))
+
+
+assists<-events2%>%
+  filter(Event == "ASSIST")%>%
+  group_by(cowid)%>%
+  summarize(date_assist = min(date), 
+            date_assist_max = max(date))%>%
+  distinct()%>%
+  mutate(date_assist_diff = as.numeric(date_assist_max-date_assist))
+
+health<-events2%>%
+  filter(EVT_type %in% 'health')%>%
+  group_by(cowid, Event)%>%
+  summarize(date_event_min = min(date), 
+            date_event_max = max(date))%>%
+  ungroup()%>%
+  distinct()%>%
+  select(cowid, Event, date_event_min)%>%
+  pivot_wider(names_from = Event, 
+              values_from = date_event_min)
+
+
+
+archives<-events2%>%
+  select(cowid, ardat)%>%
+  distinct()%>%
+  group_by(cowid)%>%
+  summarize(date_archive = min(ardat), 
+            date_archive_max = max(ardat))%>%
+  distinct()%>%
+  mutate(date_archive_diff = as.numeric(date_archive_max-date_archive))
+
+
+
+#-----------------------------------------------------
+animals2<-animals%>%
+  left_join(deads)%>%
+  left_join(solds)%>%
+  left_join(arrives_pot)%>%
+  left_join(arrives_kdd)%>%
+  left_join(health)%>%
+  left_join(archives)%>%
+  mutate(DateNewVacProtocol = lubridate::ymd('2024-04-15'))%>%
+  mutate(RecievedNewVac = bdat>lubridate::ymd('2024-04-15'))%>%
+  mutate(date_stop = case_when(
+    (is.na(date_died)<1)~date_died, 
+    (is.na(date_sold)<1)~date_sold, 
+    (is.na(date_archive)<1)~date_archive, 
+    TRUE~data_pull_date
+  ))%>%
+  mutate(days_age_at_stop = as.numeric(date_stop-bdat))%>%
+  filter(days_age_at_stop>-0)
+
+
+  ggplot(animals2)+
+    geom_histogram(aes(x = days_age_at_stop))
+
+
+```
+
+
+
+```{r}
+write_rds(deads, 'Data/IntermediateFiles/deads.rds')
+write_rds(solds, 'Data/IntermediateFiles/solds.rds')
+write_rds(animals2, 'Data/IntermediateFiles/animals2.rds') #important dates, 1st treat disease incidence
+
+#write_rds(animals2, 'shinyDiseaseTiming/animals2.rds') #important dates, 1st treat disease incidence
+
+```
+
+
+#create health event details
+```{r}
+
+list_health_events<-events2%>%
+  filter(EVT_type %in% 'health')%>%
+  select(Event)%>%
+  distinct()
+
+#i=1
+health_details<-events2%>%
+  filter(Event %in% list_health_events[[i]])
+  group_by(cowid, Event)%>%
+  summarize(date_event_min = min(date), 
+            date_event_max = max(date))%>%
+  ungroup()%>%
+  distinct()%>%
+  select(cowid, Event, date_event_min)%>%
+  pivot_wider(names_from = Event, 
+              values_from = date_event_min)
+```
+
+
+
+
+
+
+
+
