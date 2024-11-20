@@ -33,19 +33,41 @@ events2<-read_rds('Data/IntermediateFiles/events2.rds')%>%
  #                     "100006308/30/17",  "100011309/17/17",  "100012509/24/17",
  #                     "1000743503/20/22", "1000750204/01/22", "1000755104/10/22", "1000756304/12/22"))
  
-pull_date<-max(events2$date)
+#pull_date<-max(events2$date)
 ```
 
 #animals and important dates
 ```{r}
 animals<-events2%>%
-  group_by(animal_id, bdat, source_farm, source_state, data_pull_date
-         )%>%
+  group_by(animal_id, bdat, 
+           source_farm, source_state, #optional
+           data_pull_date_min, data_pull_date_max)%>%
   summarize(breed = paste0(sort(unique(breed)), collapse = ','))%>%
-  ungroup()%>%
-  mutate(cohort_birth_month = floor_date(bdat, unit = 'months'), 
-         cohort_birth_season = floor_date(bdat, unit = 'seasons'))
-  
+  ungroup()
+
+
+animal_lactations<-events2%>%
+  select(animal_id, LACT)%>%
+  distinct()%>%
+  mutate(animal_id_lact = paste0(animal_id, '_', 'LACT'))
+
+archives<-events2%>%
+  select(animal_id, ardat)%>%
+  distinct()%>%
+  group_by(animal_id)%>%
+  summarize(date_archive = min(ardat), 
+            date_archive_max = max(ardat))%>%
+  distinct()%>%
+  mutate(date_archive_diff = as.numeric(date_archive_max-date_archive))
+
+
+freshs<-events2%>%
+  filter(Event == 'FRESH')%>%
+  group_by(animal_id)%>%
+  summarize(date_fresh = min(date), 
+            date_fresh_max = max(date))%>%
+  distinct()%>%
+  mutate(qc_date_fresh_diff = as.numeric(date_fresh_max-date_fresh))
 
 deads<-events2%>%
   filter(Event == 'DIED')%>%
@@ -53,11 +75,8 @@ deads<-events2%>%
   summarize(date_died = min(date), 
             date_died_max = max(date))%>%
   distinct()%>%
-  mutate(date_died_diff = as.numeric(date_died_max-date_died))
-
-
-
-
+  mutate(qc_date_died_diff = as.numeric(date_died_max-date_died))
+    
 solds<-events2%>%
   filter(Event == 'SOLD')%>%
   group_by(animal_id)%>%
@@ -66,6 +85,51 @@ solds<-events2%>%
   distinct()%>%
   mutate(date_sold_diff = as.numeric(date_sold_max-date_sold))
 
+drys<-events2%>%
+  filter(Event == 'DRY')%>%
+  group_by(animal_id)%>%
+  summarize(date_dry = min(date), 
+            date_dry_max = max(date))%>%
+  distinct()%>%
+  mutate(date_dry_diff = as.numeric(date_dry_max-date_dry))
+
+
+#health events -------------------------
+health_animal<-events2%>%
+  filter(event_type %in% 'health')%>%
+  filter(!(is.na(animal_id)))%>%
+  filter(!(is.na(Event)))%>%
+  arrange(animal_id, Event, date)%>%
+  group_by(animal_id, Event)%>%
+  mutate(event_ct_animal = 1:n(), 
+         event_ct_animal_txt = paste0(Event, event_ct_animal)
+         )%>%
+  ungroup()%>%
+  select(animal_id, date,  event_ct_animal_txt)%>%
+  distinct()%>%
+  pivot_wider(names_from = event_ct_animal_txt, 
+              values_from = date)%>%
+  distinct()
+
+health_animal_lactation<-events2%>%
+  filter(event_type %in% 'health')%>%
+  arrange(animal_id_lact, Event, date)%>%
+  group_by(animal_id_lact, Event)%>%
+  mutate(event_ct_animal_lact = 1:n(), 
+         event_ct_animal_lact_txt = paste0(Event, event_ct_animal_lact) 
+         )%>%
+  ungroup()%>%
+  select(animal_id_lact, date,  event_ct_animal_lact_txt)%>%
+  distinct()%>%
+  pivot_wider(names_from = event_ct_animal_lact_txt, 
+              values_from = date)
+
+```
+
+
+#custom important events------------------------
+
+```{r}
 arrives_pot<-events2%>%
   filter(Event == 'ARVDPOT')%>%
   group_by(animal_id)%>%
@@ -92,88 +156,59 @@ assists<-events2%>%
   distinct()%>%
   mutate(date_assist_diff = as.numeric(date_assist_max-date_assist))
 
-health<-events2%>%
-  filter(EVT_type %in% 'health')%>%
-  group_by(animal_id, Event)%>%
-  summarize(date_event_min = min(date), 
-            date_event_max = max(date))%>%
-  ungroup()%>%
-  distinct()%>%
-  select(animal_id, Event, date_event_min)%>%
-  pivot_wider(names_from = Event, 
-              values_from = date_event_min)
 
 
 
-archives<-events2%>%
-  select(animal_id, ardat)%>%
-  distinct()%>%
-  group_by(animal_id)%>%
-  summarize(date_archive = min(ardat), 
-            date_archive_max = max(ardat))%>%
-  distinct()%>%
-  mutate(date_archive_diff = as.numeric(date_archive_max-date_archive))
+```
+
+#write out files
+
+```{r}
+write_rds(animals, 'Data/IntermediateFiles/animals.rds')
+write_rds(animal_lactations, 'Data/IntermediateFiles/animal_lactations.rds')
+
+write_rds(deads, 'Data/IntermediateFiles/deads.rds')
+write_rds(solds, 'Data/IntermediateFiles/solds.rds')
+write_rds(freshs, 'Data/IntermediateFiles/fresh.rds')
+
+write_rds(health_animal, 'Data/IntermediateFiles/health_animal.rds')
+write_rds(health_animal_lactation, 'Data/IntermediateFiles/health_animal_lactation.rds')
+
+```
 
 
 
+```{r}
 #-----------------------------------------------------
 animals2<-animals%>%
+  left_join(archives)%>%
   left_join(deads)%>%
   left_join(solds)%>%
+  left_join(freshs)%>%
+  left_join(drys)%>%
   left_join(arrives_pot)%>%
   left_join(arrives_kdd)%>%
-  left_join(health)%>%
-  left_join(archives)%>%
   mutate(DateNewVacProtocol = lubridate::ymd('2024-04-15'))%>%
   mutate(RecievedNewVac = bdat>lubridate::ymd('2024-04-15'))%>%
   mutate(date_stop = case_when(
     (is.na(date_died)<1)~date_died, 
     (is.na(date_sold)<1)~date_sold, 
     (is.na(date_archive)<1)~date_archive, 
-    TRUE~data_pull_date
+    TRUE~data_pull_date_max
   ))%>%
   mutate(days_age_at_stop = as.numeric(date_stop-bdat))%>%
   filter(days_age_at_stop>-0)
 
 
-  ggplot(animals2)+
-    geom_histogram(aes(x = days_age_at_stop))
+write_rds(animals2, 'Data/IntermediateFiles/animals2.rds')
 
 
 ```
 
 
 
-```{r}
-write_rds(deads, 'Data/IntermediateFiles/deads.rds')
-write_rds(solds, 'Data/IntermediateFiles/solds.rds')
-write_rds(animals2, 'Data/IntermediateFiles/animals2.rds') #important dates, 1st treat disease incidence
-
-#write_rds(animals2, 'shinyDiseaseTiming/animals2.rds') #important dates, 1st treat disease incidence
-
-```
 
 
-#create health event details
-```{r}
-
-list_health_events<-events2%>%
-  filter(EVT_type %in% 'health')%>%
-  select(Event)%>%
-  distinct()
-
-#i=1
-health_details<-events2%>%
-  filter(Event %in% list_health_events[[i]])
-  group_by(animal_id, Event)%>%
-  summarize(date_event_min = min(date), 
-            date_event_max = max(date))%>%
-  ungroup()%>%
-  distinct()%>%
-  select(animal_id, Event, date_event_min)%>%
-  pivot_wider(names_from = Event, 
-              values_from = date_event_min)
-```
 
 
 

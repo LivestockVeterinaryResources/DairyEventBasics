@@ -16,6 +16,8 @@ WARNING: You MUST run this script from top to bottom.  Running only part of it w
 #setup
 ```{r}
 library(tidyverse)
+library(gt)
+
 source('FUNCTIONS/fxn_sourcefarms.R') #function that parses cow id to identify source farm, it is farm specific
 source('FUNCTIONS/fxn_event_type.R')
 
@@ -59,7 +61,9 @@ for (i in seq_along(list_files)){
 }
 
 ```
+
 #initial cleanup
+
 ```{r}
 events2<-events%>%
   #take out junk------------------
@@ -67,7 +71,8 @@ events2<-events%>%
   filter(!(is.na(Event)))%>% #get rid of columns that do not have an event - they are also not useful
   select(-starts_with('...'))%>% #get rid of extra columns created by odd parsing in the csv file
   #create unique cow id--------------------------------------- 
-  mutate(animal_id = paste0(ID, BDAT), 
+  mutate(animal_id = paste0(ID, '_', BDAT), 
+         animal_id_lact = paste0(ID, '_', BDAT, '_', LACT), 
          breed = CBRD)%>%
   #format date--------------------------------------- 
   mutate(date = lubridate::mdy(Date), 
@@ -143,7 +148,7 @@ QC_event_type<-events2%>%
   group_by(Event, Protocols, event_type)%>%
   summarize(count = sum(n()))%>%
   ungroup()
-write_csv(QC_event_type, 'Data/QCFiles/QC_event_type.csv')
+write_rds(QC_event_type, 'Data/QCFiles/QC_event_type.rds')
 
 
 QC_source_farm<-events2%>%
@@ -151,15 +156,37 @@ QC_source_farm<-events2%>%
   group_by(Event, Protocols, source_farm)%>%
   summarize(count = sum(n()))%>%
   ungroup()
-write_csv(QC_source_farm, 'Data/QCFiles/QC_source_farm.csv')
+write_rds(QC_source_farm, 'Data/QCFiles/QC_source_farm.rds')
+
+total_animals<-events2%>%
+  mutate(year = year(date))%>%
+  group_by(year)%>%
+  summarize(count_cows = n_distinct(animal_id), 
+            count_lactations = n_distinct(animal_id_lact)
+            )%>%
+  ungroup()
+              
 
 ```
 
 ## Initial Processing Report
 
-### Start date: `r min(events2$date)`
+#### Start date: `r min(events2$date)`
 
-### End date: `r max(events2$date)`
+#### End date: `r max(events2$date)`
+
+### Animal Counts
+
+```{r}
+total_animals%>%gt()
+
+ggplot(total_animals)+
+  geom_bar(aes(x = year, y = count_cows), stat = 'identity')
+
+```
+
+
+#### Total Lactations: `r total_animals%>%gt()`
 
 ### QC Event Types
 

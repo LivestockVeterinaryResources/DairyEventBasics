@@ -18,7 +18,9 @@ library(rmarkdown)
 
 ### Step 0
 ```{r}
+
 rmarkdown::render(input = 'step1_ReadInData.Rmd')
+
 ```
 
 
