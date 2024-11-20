@@ -20,22 +20,16 @@ source('FUNCTIONS/fxn_lag_master.R')
 ```{r}
 events2<-read_rds('Data/IntermediateFiles/events2.rds')%>%
   filter(!(is.na(bdat)))%>% 
-  mutate(data_pull_date = max(date, na.rm = TRUE))%>%
-  mutate(data_pull_date = max(date, na.rm = TRUE))%>%
+  mutate(data_pull_date_min = min(date, na.rm = TRUE))%>%
+  mutate(data_pull_date_max = max(date, na.rm = TRUE))%>%
   mutate(
     breed = case_when(
       is.na(breed)~'Unkown', 
-      TRUE~breed), 
-    source_farm = case_when(
-      is.na(source_farm)~'Unknown', 
-      TRUE~source_farm), 
-    source_state = case_when(
-      is.na(source_state)~'Unknown',
-      TRUE~source_state)
+      TRUE~breed)
           )%>%
   rowid_to_column()#%>%
-  #filter(cowid %in% '9301260606/24/23')
- # filter(cowid %in% c('1200230604/04/19',
+  #filter(animal_id %in% '9301260606/24/23')
+ # filter(animal_id %in% c('1200230604/04/19',
  #                     "100006308/30/17",  "100011309/17/17",  "100012509/24/17",
  #                     "1000743503/20/22", "1000750204/01/22", "1000755104/10/22", "1000756304/12/22"))
  
@@ -45,7 +39,7 @@ pull_date<-max(events2$date)
 #animals and important dates
 ```{r}
 animals<-events2%>%
-  group_by(cowid, bdat, source_farm, source_state, data_pull_date
+  group_by(animal_id, bdat, source_farm, source_state, data_pull_date
          )%>%
   summarize(breed = paste0(sort(unique(breed)), collapse = ','))%>%
   ungroup()%>%
@@ -55,7 +49,7 @@ animals<-events2%>%
 
 deads<-events2%>%
   filter(Event == 'DIED')%>%
-  group_by(cowid)%>%
+  group_by(animal_id)%>%
   summarize(date_died = min(date), 
             date_died_max = max(date))%>%
   distinct()%>%
@@ -66,7 +60,7 @@ deads<-events2%>%
 
 solds<-events2%>%
   filter(Event == 'SOLD')%>%
-  group_by(cowid)%>%
+  group_by(animal_id)%>%
   summarize(date_sold = min(date), 
             date_sold_max = max(date))%>%
   distinct()%>%
@@ -74,7 +68,7 @@ solds<-events2%>%
 
 arrives_pot<-events2%>%
   filter(Event == 'ARVDPOT')%>%
-  group_by(cowid)%>%
+  group_by(animal_id)%>%
   summarize(date_arrived_pot = min(date), 
             date_arrived_pot_max = max(date))%>%
   distinct()%>%
@@ -83,7 +77,7 @@ arrives_pot<-events2%>%
 
 arrives_kdd<-events2%>%
   filter(Event == "ARVKDD")%>%
-  group_by(cowid)%>%
+  group_by(animal_id)%>%
   summarize(date_arrived_kdd = min(date), 
             date_arrived_kdd_max = max(date))%>%
   distinct()%>%
@@ -92,7 +86,7 @@ arrives_kdd<-events2%>%
 
 assists<-events2%>%
   filter(Event == "ASSIST")%>%
-  group_by(cowid)%>%
+  group_by(animal_id)%>%
   summarize(date_assist = min(date), 
             date_assist_max = max(date))%>%
   distinct()%>%
@@ -100,21 +94,21 @@ assists<-events2%>%
 
 health<-events2%>%
   filter(EVT_type %in% 'health')%>%
-  group_by(cowid, Event)%>%
+  group_by(animal_id, Event)%>%
   summarize(date_event_min = min(date), 
             date_event_max = max(date))%>%
   ungroup()%>%
   distinct()%>%
-  select(cowid, Event, date_event_min)%>%
+  select(animal_id, Event, date_event_min)%>%
   pivot_wider(names_from = Event, 
               values_from = date_event_min)
 
 
 
 archives<-events2%>%
-  select(cowid, ardat)%>%
+  select(animal_id, ardat)%>%
   distinct()%>%
-  group_by(cowid)%>%
+  group_by(animal_id)%>%
   summarize(date_archive = min(ardat), 
             date_archive_max = max(ardat))%>%
   distinct()%>%
@@ -171,12 +165,12 @@ list_health_events<-events2%>%
 #i=1
 health_details<-events2%>%
   filter(Event %in% list_health_events[[i]])
-  group_by(cowid, Event)%>%
+  group_by(animal_id, Event)%>%
   summarize(date_event_min = min(date), 
             date_event_max = max(date))%>%
   ungroup()%>%
   distinct()%>%
-  select(cowid, Event, date_event_min)%>%
+  select(animal_id, Event, date_event_min)%>%
   pivot_wider(names_from = Event, 
               values_from = date_event_min)
 ```

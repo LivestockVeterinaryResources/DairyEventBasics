@@ -5,8 +5,13 @@ date: "2024-08-17"
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+#knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+
 ```
+
+
+WARNING: You MUST run this script from top to bottom.  Running only part of it will result in errors.  Data frames are named the same thing at the begining of the script as the end.  This improves performance in large data sets, but means that great care should be taken when the script is not run from top to bottom.
 
 #setup
 ```{r}
@@ -17,6 +22,20 @@ source('FUNCTIONS/fxn_event_type.R')
 ```
 
 #read in event files
+
+Pull events from dairy comp using this code
+Option 1 Pull 5 years in one file: EVENTS\2S2000C #1 #2 #4 #5 #6 #11 #12 #13 #15 #28 #29 #30 #31 #32 #38 #40 #43
+Option 2 pull smaller time frames using "days back" starting with "S""days back" and ending with "L""days back": EVENTS\2S99L0C #1 #2 4 #5 #6 #11 #12 #13 #15 #28 #29 #30 #31 #32 #38 #40 #43
+
+
+This code pulls the following items along with the columns always generated with an events2 command in DC305
+"ID"         "PEN"        "REG"        "EID"        "CBRD"      
+"BDAT"       "EDAT"       "LACT"       "RC"         "HDAT"      
+"FDAT"       "CDAT"       "DDAT"       "PODAT"      "ABDAT"     
+"VDAT"       "ARDAT"      "Event"      "DIM"        "Date"      
+"Remark"     "R"          "T"          "B"          "Protocols" 
+"Technician"
+
 ```{r}
 #List out items in pull code
 #at FTDAT as item on the fly
@@ -25,6 +44,7 @@ source('FUNCTIONS/fxn_event_type.R')
 #Pull events from dairy comp using this code
 #Option 1 Pull 5 years in one file: EVENTS\2S2000C #1 #2 #4 #5 #6 #11 #12 #13 #15 #28 #29 #30 #31 #32 #38 #40 #43
 #Option 2 pull smaller time frames using "days back" starting with "S""days back" and ending with "L""days back": EVENTS\2S99L0C #1 #2 #4 #5 #6 #11 #12 #13 #15 #28 #29 #30 #31 #32 #38 #40 #43
+
 
 
 list_files<-list.files('Data/EventFiles') #folder name where event files are located
@@ -42,61 +62,186 @@ for (i in seq_along(list_files)){
 #initial cleanup
 ```{r}
 events2<-events%>%
-  filter(!(is.na(Date)))%>%
-  select(-starts_with('...'))%>% #git rid of extra columns
-  #base id--------------------------------------- 
-  mutate(cowid = paste0(ID, BDAT), 
+  #take out junk------------------
+  filter(!(is.na(Date)))%>% #get rid of columns that are missing a date - they are not useful
+  filter(!(is.na(Event)))%>% #get rid of columns that do not have an event - they are also not useful
+  select(-starts_with('...'))%>% #get rid of extra columns created by odd parsing in the csv file
+  #create unique cow id--------------------------------------- 
+  mutate(animal_id = paste0(ID, BDAT), 
          breed = CBRD)%>%
   #format date--------------------------------------- 
-  mutate(abdat = lubridate::mdy(ABDAT),
+  mutate(date = lubridate::mdy(Date), 
+         
+          bdat = lubridate::mdy(BDAT), 
+         
+         fdat = lubridate::mdy(FDAT), 
          ardat = lubridate::mdy(ARDAT),
-         bdat = lubridate::mdy(BDAT), 
+        
+         
          cdat = lubridate::mdy(CDAT), 
-         date = lubridate::mdy(Date), 
+         abdat = lubridate::mdy(ABDAT),
          ddat = lubridate::mdy(DDAT),
          edat = lubridate::mdy(EDAT), 
-         fdat = lubridate::mdy(FDAT), 
          hdat = lubridate::mdy(HDAT),
          podat = lubridate::mdy(PODAT)
+         
          )%>%
-  mutate(DIM = parse_number(DIM))%>%
-  arrange(cowid, date)%>%
-  distinct()%>%  #may not be good
-  
-  #create event type template
-  
-  
-  #define event types------------------------------------
-  mutate(EVT_type = case_when(
-  Event %in% c("ABORT","BRED", "BULLPEN", "FMARTIN", "GNRH", "HEAT", "MV2AI", 
-               "OK",      "OPEN", "PREG", "PREV", "PROST", "RECHK" )~'repro', 
-  Event %in% c ("ASSIST", "BLOAT", "DIPTHRA", "FEVER", "HLTHSCR", "ILLMISC", "INDIG", "INJURY", 
-                "LAME", "MAST", "NAVEL", "OTHER","OTITIS",  "PINKEYE", "PNEU", "RP", 
-                "SCOURS",  "SEPTIC", "SWLNLEG")~'health', 
-  Event %in% c("ARVDPOT", "DNB", "DRY", "GOAMISH", "GODEER", "GOHOME",  "MOVE")~'mgmt', 
-  Event %in% c("ARVKDD", "BEEF", "DIED", "FRESH", "SOLD")~'param', 
-  Event %in% c("INWEIGH", "MEASURE", "TP")~'measure',
-  Event %in% c("CHECK", "CHKDBN", "CLFSERU", "COMMENT", "INV",  "OBSERVE", "TBTEST",  
-               "TRIAL", "USER6", "USER7",  "XID", "ZPRBRED")~'ask', 
-    Event %in% c("BANGVAC", "VACC")~'vac', 
-  TRUE~'Unknown'
-   ))%>%
-  
+  #parse numbers -------------------
+  mutate(DIM = parse_number(DIM), 
+         LACT = parse_number(LACT))%>%
+  arrange(animal_id, date)%>%
+  distinct()%>%
+  #replace missing values in remark and protocols to allow grouping later----------------
+  mutate(Protocols = str_replace_na(Protocols, 'BLANK_UNKNOWN'), 
+         Remark = str_replace_na(Remark, 'BLANK_UNKNOWN'))
 
-  #add source farm ------------------
+  #create event type template---------------------
+  template_event_type <- events2%>%
+    group_by(Event, Protocols)%>%
+    summarize(count = sum(n()))%>%
+    ungroup()
+  write_csv(template_event_type, 'Data/TemplateFiles/template_event_type.csv')
   
-  fxn_add_source_farm() #this function adds source farm and is specific to the farms in the data set, not a universal function
 ```
 
-#write out final file 
+#add farm specific variables
+```{r}
+#define event types------------------------------------
+  events2 <-events2%>%
+  #standardize event type--------------------
+  fxn_event_type()%>% #this function standardizes event types based on your choices in the standardize file
+  #add source farm ------------------
+  fxn_add_source_farm() %>% #this function adds source farm and is specific to the farms in the data set, not a universal function
+  #fix na values-------------
+  mutate(
+    event_type = case_when(
+      is.na(event_type)~'Unknown',
+      TRUE~event_type), 
+    source_farm = case_when(
+      is.na(source_farm)~'Unknown', 
+      TRUE~source_farm), 
+    source_state = case_when(
+      is.na(source_state)~'Unknown', 
+      TRUE~source_state
+    )
+  )
+
+
+
+```
+
+#write out final files
 
 ```{r}
 
-
+#main file------------
 write_rds(events2, 'Data/IntermediateFiles/events2.rds')
 
+#data quality files------------
+QC_event_type<-events2%>%
+  filter(event_type %in% 'Unknown')%>%
+  group_by(Event, Protocols, event_type)%>%
+  summarize(count = sum(n()))%>%
+  ungroup()
+write_csv(QC_event_type, 'Data/QCFiles/QC_event_type.csv')
+
+
+QC_source_farm<-events2%>%
+  filter(source_farm %in% 'Unknown')%>%
+  group_by(Event, Protocols, source_farm)%>%
+  summarize(count = sum(n()))%>%
+  ungroup()
+write_csv(QC_source_farm, 'Data/QCFiles/QC_source_farm.csv')
+
+```
+
+## Initial Processing Report
+
+### Start date: `r min(events2$date)`
+
+### End date: `r max(events2$date)`
+
+### QC Event Types
+
+```{r}
+if (dim(QC_event_type)[1]<1){
+  print('All Event Types Mapped')
+}else{
+  ggplot(QC_event_type)+
+    geom_bar(aes(x = Protocols, y = count), stat = 'identity', fill = 'red')+
+    facet_wrap(Event~., scales = 'free')
+}
+
+summarize_event_type<-events2%>%
+         group_by(event_type)%>%
+         summarize(count_animal_id = n_distinct(animal_id))%>%
+         ungroup()
+
+```
+
+### QC Source Farms
+
+```{r, fig.show="hold", out.width="50%"}
+
+if (dim(QC_source_farm)[1]<1){
+  print('All Source Farms Mapped')
+}else{
+  ggplot(QC_source_farm)+
+    geom_bar(aes(x = Protocols, y = count), stat = 'identity', fill = 'red')+
+    facet_wrap(Event~., scales = 'free')
+}
+
+summarize_source_farm<-events2%>%
+         mutate(year = year(date))%>%
+         group_by(source_farm, source_state, year)%>%
+         summarize(count_animal_id = n_distinct(animal_id))%>%
+         ungroup()
+
+list_source_states<-sort(unique(events2$source_state))
+
+#i=1
+for (i in seq_along(list_source_states)){
+p<-ggplot(summarize_source_farm%>%filter(source_state %in% list_source_states[i]))+ 
+  geom_bar(aes(x = source_farm, y = count_animal_id, fill = factor(year)), 
+           stat = 'identity', position = position_dodge(width = 0.8, preserve = "single"))+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  labs(title = paste0(list_source_states[i]), 
+       fill = 'Year')+
+  scale_fill_manual(values =c('#ffff99','#a6cee3','#b2df8a','#fb9a99','#fdbf6f','#cab2d6',
+                              '#b15928', '#1f78b4','#33a02c','#e31a1c','#ff7f00','#6a3d9a'))
+print(p)
+}
+
+
+```
+
+
+### Main Data
+
+```{r, fig.show="hold", out.width="50%"}
+main_data<-events2%>%
+  group_by(Event, event_type)%>%
+  summarize(count_animal_id = n_distinct(animal_id))%>%
+  ungroup()
+
+list_event_types<-sort(unique(main_data$event_type))
+
+#i=1
+for (i in seq_along(list_event_types)){
+p<-ggplot(main_data%>%filter(event_type %in% list_event_types[[i]]))+
+  geom_bar(aes(x = Event, y = count_animal_id), stat = 'identity')+
+  facet_wrap(event_type~., scales = 'free')+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  labs(title = paste0(list_event_types[[i]]))
+
+print(p)
+}
   
 ```
+
+
 
 
 
