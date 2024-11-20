@@ -16,10 +16,17 @@ library(rmarkdown)
 
 ```
 
-### Step 0
+### Step 1
 ```{r}
 
 rmarkdown::render(input = 'step1_ReadInData.Rmd')
+
+```
+
+### Step 2
+```{r}
+
+rmarkdown::render(input = 'step2_CreateIntermediateFiles.Rmd')
 
 ```
 

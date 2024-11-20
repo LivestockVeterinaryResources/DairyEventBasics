@@ -1,4 +1,4 @@
-# DairyEventBasics
+# DairyEventBasics - single herd management file
 
 The goal of this is to streamline initial data processing so that more time can be spent acting on conclusions from data rather than processing it.  The example code below pulls 5 years of data in order to have the opportunity to look at trends over at least 3 years with complete lactations for most cows.  However, depending on what you want to look at, a shorter time frame may be utilized.
 
@@ -20,5 +20,10 @@ Option 2 pull smaller time frames using "days back" starting with "S""days back"
 EVENTS\2S99L0C #1 #2 4 #5 #6 #11 #12 #13 #15 #28 #29 #30 #31 #32 #38 #40 #43
 
 
-Step 2 - Open the file names "step0_MasterProcessing.Rmd" in Rstudio.  Run the file.
+Step 2 - Open the file names "step0_MasterProcessing.Rmd" in Rstudio.  Check to make sure that all farm specific functions are set up correctly.
+
+Step 3 - Run step0_MasterProcessing.Rmd
+
+Step 4 - View the report files.  If files are written to shiny apps, open the app code and deploy them.
+
 

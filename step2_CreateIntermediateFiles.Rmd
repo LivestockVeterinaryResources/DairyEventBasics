@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(tidyverse)
 
-source('FUNCTIONS/fxn_lag_master.R')
+#source('FUNCTIONS/fxn_lag_master.R')
 
 
 ```
@@ -36,8 +36,9 @@ events2<-read_rds('Data/IntermediateFiles/events2.rds')%>%
 #pull_date<-max(events2$date)
 ```
 
-#animals and important dates
+#animals events
 ```{r}
+#animals - eacy row is an animal------------
 animals<-events2%>%
   group_by(animal_id, bdat, 
            source_farm, source_state, #optional
@@ -45,12 +46,43 @@ animals<-events2%>%
   summarize(breed = paste0(sort(unique(breed)), collapse = ','))%>%
   ungroup()
 
-
-animal_lactations<-events2%>%
-  select(animal_id, LACT)%>%
+#deads - each row is animal
+deads<-events2%>%
+  filter(Event == 'DIED')%>%
+  group_by(animal_id)%>%
+  summarize(date_died = min(date), 
+            date_died_max = max(date))%>%
   distinct()%>%
-  mutate(animal_id_lact = paste0(animal_id, '_', 'LACT'))
+  mutate(qc_date_died_diff = as.numeric(date_died_max-date_died))
 
+#solds - each row is animal
+solds<-events2%>%
+  filter(Event == 'SOLD')%>%
+  group_by(animal_id)%>%
+  summarize(date_sold = min(date), 
+            date_sold_max = max(date))%>%
+  distinct()%>%
+  mutate(date_sold_diff = as.numeric(date_sold_max-date_sold))
+
+#------------------------------------------------
+master_animal_events<-animals%>%
+  left_join(solds)%>%
+  left_join(deads)
+
+write_rds(master_animal_events, 'Data/IntermediateFiles/master_animal_events.rds')
+
+```
+
+#animal lactation events
+```{r}
+#animal_lactations - each row is an animal/lactation----------
+animal_lactations<-events2%>%
+  group_by(animal_id, animal_id_lact, LACT)%>%
+  summarize(date_lact_start = min(date), 
+            date_lact_end = max(date))%>%
+  ungroup()
+
+#archives - each row is animal/lactation
 archives<-events2%>%
   select(animal_id, ardat)%>%
   distinct()%>%
@@ -60,7 +92,7 @@ archives<-events2%>%
   distinct()%>%
   mutate(date_archive_diff = as.numeric(date_archive_max-date_archive))
 
-
+#freshs - each row is animal/lactation------------
 freshs<-events2%>%
   filter(Event == 'FRESH')%>%
   group_by(animal_id)%>%
@@ -69,22 +101,9 @@ freshs<-events2%>%
   distinct()%>%
   mutate(qc_date_fresh_diff = as.numeric(date_fresh_max-date_fresh))
 
-deads<-events2%>%
-  filter(Event == 'DIED')%>%
-  group_by(animal_id)%>%
-  summarize(date_died = min(date), 
-            date_died_max = max(date))%>%
-  distinct()%>%
-  mutate(qc_date_died_diff = as.numeric(date_died_max-date_died))
-    
-solds<-events2%>%
-  filter(Event == 'SOLD')%>%
-  group_by(animal_id)%>%
-  summarize(date_sold = min(date), 
-            date_sold_max = max(date))%>%
-  distinct()%>%
-  mutate(date_sold_diff = as.numeric(date_sold_max-date_sold))
 
+
+#drys - each row is animal/lacatation
 drys<-events2%>%
   filter(Event == 'DRY')%>%
   group_by(animal_id)%>%
@@ -93,8 +112,20 @@ drys<-events2%>%
   distinct()%>%
   mutate(date_dry_diff = as.numeric(date_dry_max-date_dry))
 
+#master animal_lactation events-----------------
 
-#health events -------------------------
+master_animal_lactation_events<-animal_lactations%>%
+  left_join(freshs)%>%
+  left_join(drys)%>%
+  left_join(archives)
+
+write_rds(master_animal_lactation_events, 'Data/IntermediateFiles/master_animal_lactation_events.rds')
+
+```
+
+#health events
+```{r}
+#health events animal - each row is an animal  -------------------------
 health_animal<-events2%>%
   filter(event_type %in% 'health')%>%
   filter(!(is.na(animal_id)))%>%
@@ -110,7 +141,7 @@ health_animal<-events2%>%
   pivot_wider(names_from = event_ct_animal_txt, 
               values_from = date)%>%
   distinct()
-
+#health events animal_lactation - each row is animal/lactation
 health_animal_lactation<-events2%>%
   filter(event_type %in% 'health')%>%
   arrange(animal_id_lact, Event, date)%>%
@@ -157,7 +188,12 @@ assists<-events2%>%
   mutate(date_assist_diff = as.numeric(date_assist_max-date_assist))
 
 
-
+#-------------------------
+custom_animal_events<-animals%>%
+  left_join(arrives_pot)%>%
+  left_join(arrives_kdd)%>%
+  left_join(assists)
+write_rds(custom_animal_events, 'Data/IntermediateFiles/custom_animal_events.rds')
 
 ```
 
@@ -200,7 +236,7 @@ animals2<-animals%>%
   filter(days_age_at_stop>-0)
 
 
-write_rds(animals2, 'Data/IntermediateFiles/animals2.rds')
+write_rds(animals2, 'Data/IntermediateFiles/animals2.rds') #this is a Farm specific file, do not include in final
 
 
 ```
