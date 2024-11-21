@@ -22,18 +22,8 @@ events2<-read_rds('Data/IntermediateFiles/events2.rds')%>%
   filter(!(is.na(bdat)))%>% 
   mutate(data_pull_date_min = min(date, na.rm = TRUE))%>%
   mutate(data_pull_date_max = max(date, na.rm = TRUE))%>%
-  mutate(
-    breed = case_when(
-      is.na(breed)~'Unkown', 
-      TRUE~breed)
-          )%>%
-  rowid_to_column()#%>%
-  #filter(animal_id %in% '9301260606/24/23')
- # filter(animal_id %in% c('1200230604/04/19',
- #                     "100006308/30/17",  "100011309/17/17",  "100012509/24/17",
- #                     "1000743503/20/22", "1000750204/01/22", "1000755104/10/22", "1000756304/12/22"))
- 
-#pull_date<-max(events2$date)
+  rowid_to_column()
+
 ```
 
 #animals events
@@ -65,11 +55,11 @@ solds<-events2%>%
   mutate(date_sold_diff = as.numeric(date_sold_max-date_sold))
 
 #------------------------------------------------
-master_animal_events<-animals%>%
+master_animals<-animals%>%
   left_join(solds)%>%
   left_join(deads)
 
-write_rds(master_animal_events, 'Data/IntermediateFiles/master_animal_events.rds')
+write_rds(master_animals, 'Data/IntermediateFiles/master_animals.rds')
 
 ```
 
@@ -84,9 +74,9 @@ animal_lactations<-events2%>%
 
 #archives - each row is animal/lactation
 archives<-events2%>%
-  select(animal_id, ardat)%>%
+  select(animal_id_lact, ardat)%>%
   distinct()%>%
-  group_by(animal_id)%>%
+  group_by(animal_id_lact)%>%
   summarize(date_archive = min(ardat), 
             date_archive_max = max(ardat))%>%
   distinct()%>%
@@ -95,7 +85,7 @@ archives<-events2%>%
 #freshs - each row is animal/lactation------------
 freshs<-events2%>%
   filter(Event == 'FRESH')%>%
-  group_by(animal_id)%>%
+  group_by(animal_id_lact)%>%
   summarize(date_fresh = min(date), 
             date_fresh_max = max(date))%>%
   distinct()%>%
@@ -106,7 +96,7 @@ freshs<-events2%>%
 #drys - each row is animal/lacatation
 drys<-events2%>%
   filter(Event == 'DRY')%>%
-  group_by(animal_id)%>%
+  group_by(animal_id_lact)%>%
   summarize(date_dry = min(date), 
             date_dry_max = max(date))%>%
   distinct()%>%
@@ -114,19 +104,19 @@ drys<-events2%>%
 
 #master animal_lactation events-----------------
 
-master_animal_lactation_events<-animal_lactations%>%
+master_animal_lactations<-animal_lactations%>%
   left_join(freshs)%>%
   left_join(drys)%>%
   left_join(archives)
 
-write_rds(master_animal_lactation_events, 'Data/IntermediateFiles/master_animal_lactation_events.rds')
+write_rds(master_animal_lactations, 'Data/IntermediateFiles/master_animal_lactations.rds')
 
 ```
 
 #health events
 ```{r}
 #health events animal - each row is an animal  -------------------------
-health_animal<-events2%>%
+health_animal_level<-events2%>%
   filter(event_type %in% 'health')%>%
   filter(!(is.na(animal_id)))%>%
   filter(!(is.na(Event)))%>%
@@ -141,8 +131,12 @@ health_animal<-events2%>%
   pivot_wider(names_from = event_ct_animal_txt, 
               values_from = date)%>%
   distinct()
+
+write_rds(health_animal_level, 'DATA/IntermediateFiles/health_animal_level.rds')
+
+
 #health events animal_lactation - each row is animal/lactation
-health_animal_lactation<-events2%>%
+health_lactation_level<-events2%>%
   filter(event_type %in% 'health')%>%
   arrange(animal_id_lact, Event, date)%>%
   group_by(animal_id_lact, Event)%>%
@@ -154,6 +148,8 @@ health_animal_lactation<-events2%>%
   distinct()%>%
   pivot_wider(names_from = event_ct_animal_lact_txt, 
               values_from = date)
+
+write_rds(health_lactation_level, 'DATA/IntermediateFiles/health_lactation_level.rds')
 
 ```
 
@@ -196,60 +192,4 @@ custom_animal_events<-animals%>%
 write_rds(custom_animal_events, 'Data/IntermediateFiles/custom_animal_events.rds')
 
 ```
-
-#write out files
-
-```{r}
-write_rds(animals, 'Data/IntermediateFiles/animals.rds')
-write_rds(animal_lactations, 'Data/IntermediateFiles/animal_lactations.rds')
-
-write_rds(deads, 'Data/IntermediateFiles/deads.rds')
-write_rds(solds, 'Data/IntermediateFiles/solds.rds')
-write_rds(freshs, 'Data/IntermediateFiles/fresh.rds')
-
-write_rds(health_animal, 'Data/IntermediateFiles/health_animal.rds')
-write_rds(health_animal_lactation, 'Data/IntermediateFiles/health_animal_lactation.rds')
-
-```
-
-
-
-```{r}
-#-----------------------------------------------------
-animals2<-animals%>%
-  left_join(archives)%>%
-  left_join(deads)%>%
-  left_join(solds)%>%
-  left_join(freshs)%>%
-  left_join(drys)%>%
-  left_join(arrives_pot)%>%
-  left_join(arrives_kdd)%>%
-  mutate(DateNewVacProtocol = lubridate::ymd('2024-04-15'))%>%
-  mutate(RecievedNewVac = bdat>lubridate::ymd('2024-04-15'))%>%
-  mutate(date_stop = case_when(
-    (is.na(date_died)<1)~date_died, 
-    (is.na(date_sold)<1)~date_sold, 
-    (is.na(date_archive)<1)~date_archive, 
-    TRUE~data_pull_date_max
-  ))%>%
-  mutate(days_age_at_stop = as.numeric(date_stop-bdat))%>%
-  filter(days_age_at_stop>-0)
-
-
-write_rds(animals2, 'Data/IntermediateFiles/animals2.rds') #this is a Farm specific file, do not include in final
-
-
-```
-
-
-
-
-
-
-
-
-
-
-
-
 

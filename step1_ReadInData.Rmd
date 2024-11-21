@@ -126,10 +126,10 @@ events2<-events%>%
   events2 <-events2%>%
   
   #standardize event type--------------------
-  fxn_event_type_custom()%>% # turn this off or on, you must modify this function in the function file
+  #fxn_event_type_custom()%>% # turn this off or on, you must modify this function in the function file
   
   #add source farm ------------------
-  fxn_add_source_farm_custom() %>% # turn this off or on, you must modify this function in the function file
+  #fxn_add_source_farm_custom() %>% # turn this off or on, you must modify this function in the function file
   
   #fix na values-------------
   mutate(
@@ -141,8 +141,10 @@ events2<-events%>%
       TRUE~source_farm), 
     source_state = case_when(
       is.na(source_state)~'Unknown', 
-      TRUE~source_state
-    )
+      TRUE~source_state),
+    breed = case_when(
+      is.na(breed)~'Unknown', 
+      TRUE~breed)
   )%>%
   mutate(
     LACTgroup_basic = case_when(
@@ -161,7 +163,6 @@ events2<-events%>%
       (LACT >2)~'LACT 3+',
       TRUE~'Unknown')
     )
-
 
 
 ```
