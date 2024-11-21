@@ -48,5 +48,9 @@ po/*~
 # RStudio Connect folder
 rsconnect/
 
-Data/
+Data/StandardizationFiles/
+Data/IntermediateFiles/
+Data/QCFiles/
+Data/EventFiles/
+Data/TemplateFiles/
 
