@@ -11,43 +11,48 @@ knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 ```
 
 
-WARNING: You MUST run this script from top to bottom.  Running only part of it will result in errors.  Data frames are named the same thing at the begining of the script as the end.  This improves performance in large data sets, but means that great care should be taken when the script is not run from top to bottom.
+***WARNING:*** You MUST run this script from top to bottom.  Running only part of it will result in errors.  Data frames are named the same thing at the begining of the script as the end.  This improves performance in large data sets, but means that great care should be taken when the script is not run from top to bottom.
 
-#setup
+***FIRST*** Be sure to set up your farm name and state name on lines 45 and 46 if you are not going to customize the functions to set these.
+
+***NEXT*** Pull events from dairy comp using this code:
+
+Option 1 Pull 5 years in one file: EVENTS\2S2000C #1 #2 #4 #5 #6 #11 #12 #13 #15 #28 #29 #30 #31 #32 #38 #40 #43
+
+Option 2 pull smaller time frames using "days back" starting with "S""days back" and ending with "L""days back":  EVENTS\2S99L0C #1 #2 #4 #5 #6 #11 #12 #13 #15 #28 #29 #30 #31 #32 #38 #40 #43
+
+
+This code pulls the following items along with the columns always generated with an events2 command in DC305:
+
+"ID" "PEN" "REG" "EID" "CBRD" "BDAT" "EDAT" "LACT" "RC" "HDAT" "FDAT" "CDAT" "DDAT" "PODAT" "ABDAT" "VDAT"   "ARDAT" 
+
+"Event" "DIM" "Date" "Remark" "Protocols" "R" "T" "B"  "Technician"
+
+***THEN*** Place your files in this folder "Data/EventFiles"
+
+The code in chunk 3 will read in all files in this folder so do not leave old files here that you do not want to process.
+
+***FINALLY*** Turn on/off (comment/un-comment) lines 128 and 131 to use custom functions for event types and source farm/state
+
+
 ```{r}
 library(tidyverse)
 library(gt)
 
-source('FUNCTIONS/fxn_sourcefarms.R') #function that parses cow id to identify source farm, it is farm specific
-source('FUNCTIONS/fxn_event_type.R')
+#custom functions, turn off or on  on line 124 and 126
+source('FUNCTIONS/fxn_sourcefarms.R') #custom function that parses cow id to identify source farm, it is farm specific
+source('FUNCTIONS/fxn_event_type.R') #custom function to identify source state based on farm
+
+set_farm_name<-'Example Farm Name'
+set_farm_state<-'Example Farm State'
+
+
+
 
 ```
 
-#read in event files
 
-Pull events from dairy comp using this code
-Option 1 Pull 5 years in one file: EVENTS\2S2000C #1 #2 #4 #5 #6 #11 #12 #13 #15 #28 #29 #30 #31 #32 #38 #40 #43
-Option 2 pull smaller time frames using "days back" starting with "S""days back" and ending with "L""days back": EVENTS\2S99L0C #1 #2 4 #5 #6 #11 #12 #13 #15 #28 #29 #30 #31 #32 #38 #40 #43
-
-
-This code pulls the following items along with the columns always generated with an events2 command in DC305
-"ID"         "PEN"        "REG"        "EID"        "CBRD"      
-"BDAT"       "EDAT"       "LACT"       "RC"         "HDAT"      
-"FDAT"       "CDAT"       "DDAT"       "PODAT"      "ABDAT"     
-"VDAT"       "ARDAT"      "Event"      "DIM"        "Date"      
-"Remark"     "R"          "T"          "B"          "Protocols" 
-"Technician"
-
-```{r}
-#List out items in pull code
-#at FTDAT as item on the fly
-#convert RDS to Parquet
-
-#Pull events from dairy comp using this code
-#Option 1 Pull 5 years in one file: EVENTS\2S2000C #1 #2 #4 #5 #6 #11 #12 #13 #15 #28 #29 #30 #31 #32 #38 #40 #43
-#Option 2 pull smaller time frames using "days back" starting with "S""days back" and ending with "L""days back": EVENTS\2S99L0C #1 #2 #4 #5 #6 #11 #12 #13 #15 #28 #29 #30 #31 #32 #38 #40 #43
-
-
+```{r read in files}
 
 list_files<-list.files('Data/EventFiles') #folder name where event files are located
 
@@ -62,9 +67,8 @@ for (i in seq_along(list_files)){
 
 ```
 
-#initial cleanup
 
-```{r}
+```{r initial cleanup}
 events2<-events%>%
   #take out junk------------------
   filter(!(is.na(Date)))%>% #get rid of columns that are missing a date - they are not useful
@@ -98,25 +102,35 @@ events2<-events%>%
   distinct()%>%
   #replace missing values in remark and protocols to allow grouping later----------------
   mutate(Protocols = str_replace_na(Protocols, 'BLANK_UNKNOWN'), 
-         Remark = str_replace_na(Remark, 'BLANK_UNKNOWN'))
+         Remark = str_replace_na(Remark, 'BLANK_UNKNOWN'))%>%
+  #add standard event types-----------------
+  fxn_event_type_default()%>%
+  #add default source farm info-----------------
+  fxn_add_source_farm_default()
 
-  #create event type template---------------------
+```
+
+
+```{r generate event_type template}
+#create event type template---------------------
   template_event_type <- events2%>%
-    group_by(Event, Protocols)%>%
+    group_by(Event, Protocols, event_type)%>%
     summarize(count = sum(n()))%>%
     ungroup()
   write_csv(template_event_type, 'Data/TemplateFiles/template_event_type.csv')
   
 ```
 
-#add farm specific variables
-```{r}
+```{r farm custom variables}
 #define event types------------------------------------
   events2 <-events2%>%
+  
   #standardize event type--------------------
-  fxn_event_type()%>% #this function standardizes event types based on your choices in the standardize file
+  fxn_event_type_custom()%>% # turn this off or on, you must modify this function in the function file
+  
   #add source farm ------------------
-  fxn_add_source_farm() %>% #this function adds source farm and is specific to the farms in the data set, not a universal function
+  fxn_add_source_farm_custom() %>% # turn this off or on, you must modify this function in the function file
+  
   #fix na values-------------
   mutate(
     event_type = case_when(
@@ -129,15 +143,31 @@ events2<-events%>%
       is.na(source_state)~'Unknown', 
       TRUE~source_state
     )
-  )
+  )%>%
+  mutate(
+    LACTgroup_basic = case_when(
+      (LACT == 0)~'Heifer', 
+      (LACT >0)~'LACT > 0',
+      TRUE~'Unknown'), 
+    LACTgroup_repro = case_when(
+      (LACT == 0)~'Heifer', 
+      (LACT ==1)~'LACT 1',
+      (LACT >1)~'LACT 2+',
+      TRUE~'Unknown'),
+    LACTgroup = case_when(
+      (LACT == 0)~'Heifer', 
+      (LACT ==1)~'LACT 1',
+      (LACT ==2)~'LACT 2',
+      (LACT >2)~'LACT 3+',
+      TRUE~'Unknown')
+    )
 
 
 
 ```
 
-#write out final files
 
-```{r}
+```{r write out files}
 
 #main file------------
 write_rds(events2, 'Data/IntermediateFiles/events2.rds')
@@ -160,8 +190,8 @@ write_rds(QC_source_farm, 'Data/QCFiles/QC_source_farm.rds')
 
 total_animals<-events2%>%
   mutate(year = year(date))%>%
-  group_by(year)%>%
-  summarize(count_cows = n_distinct(animal_id), 
+  group_by(year, LACTgroup)%>%
+  summarize(count_animals = n_distinct(animal_id), 
             count_lactations = n_distinct(animal_id_lact)
             )%>%
   ungroup()
@@ -178,15 +208,19 @@ total_animals<-events2%>%
 ### Animal Counts
 
 ```{r}
-total_animals%>%gt()
+total_animals%>%
+  select(-count_lactations)%>%
+  pivot_wider(names_from = 'LACTgroup', 
+              values_from = 'count_animals')%>%
+  gt()
 
 ggplot(total_animals)+
-  geom_bar(aes(x = year, y = count_cows), stat = 'identity')
+  geom_bar(aes(x = year, y = count_animals), stat = 'identity')+
+  facet_grid(.~LACTgroup)
 
 ```
 
 
-#### Total Lactations: `r total_animals%>%gt()`
 
 ### QC Event Types
 
@@ -196,11 +230,11 @@ if (dim(QC_event_type)[1]<1){
 }else{
   ggplot(QC_event_type)+
     geom_bar(aes(x = Protocols, y = count), stat = 'identity', fill = 'red')+
-    facet_wrap(Event~., scales = 'free')
+    facet_wrap(Event~., scales = 'free_x')
 }
 
 summarize_event_type<-events2%>%
-         group_by(event_type)%>%
+         group_by(event_type, LACTgroup)%>%
          summarize(count_animal_id = n_distinct(animal_id))%>%
          ungroup()
 

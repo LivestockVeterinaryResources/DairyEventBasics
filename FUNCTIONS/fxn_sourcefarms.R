@@ -18,8 +18,14 @@ fxn_source_state<-function(df){
       TRUE~'Unknown'  ))
 }
 
-fxn_add_source_farm<-function(df){
+fxn_add_source_farm_custom<-function(df){
   df%>%
     fxn_source_farm()%>%
     fxn_source_state()
-  }
+}
+
+fxn_add_source_farm_default<-function(df){
+  df%>%
+    mutate(source_farm = set_farm_name, 
+           source_state = set_farm_state)
+}
