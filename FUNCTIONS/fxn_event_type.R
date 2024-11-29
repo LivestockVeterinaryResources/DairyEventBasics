@@ -17,12 +17,15 @@ fxn_event_type_default<-function(df){
   df%>%
     #define event types------------------------------------
   mutate(event_type = case_when(
-    Event %in% c("ABORT","BRED", "BULLPEN", "GNRH", "HEAT",
+    Event %in% c("ABORT","BRED", "BULLPEN", "GNRH", "HEAT", "LUT", "RECHK",
                  "OK", "OPEN", "PREG", "PREV", "PROST", "PG", "DNB")~'repro',
-    Event %in% c ("ASSIST", "BLOAT", "DIPTHRA", "FEVER",  "ILLMISC", "INDIG", "INJURY",
-                  "LAME", "MAST", "NAVEL", "OTHER","OTITIS",  "PINKEYE", "PNEU", "RP",
-                  "SCOURS",  "SEPTIC", "HARDWARE", "CULTURE", "FOOTTRIM", "TRIM", "TRIMONLY")~'health',
-    Event %in% c( "GOHOME",  "MOVE")~'mgmt',
+    Event %in% c ("ASSIST", "BLOAT", "DIPTHRA", "FEVER",  "ILLMISC", "INDIG", 
+                  "INJURY", "MF", "DA",
+                  "LAME", "MAST", "NAVEL", "OTHER","OTITIS",  "PINKEYE", "PNEU",
+                  "RP",
+                  "SCOURS",  "SEPTIC", "HARDWARE", "CULTURE", "FOOTTRIM", "TRIM", 
+                  "TRIMONLY", "FOOTRIM")~'health',
+    Event %in% c( "GOHOME",  "MOVE", "TOCLOSE")~'mgmt',
     Event %in% c("DIED", "FRESH", "SOLD", "DRY")~'param',
     Event %in% c("INWEIGH", "MEASURE", "TP")~'measure',
     Event %in% c("BANGVAC", "VACC")~'vac',
