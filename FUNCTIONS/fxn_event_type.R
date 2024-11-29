@@ -26,7 +26,7 @@ fxn_event_type_default<-function(df){
                   "RP",
                   "SCOURS",  "SEPTIC", "HARDWARE", "CULTURE", "FOOTTRIM", "TRIM", 
                   "TRIMONLY", "FOOTRIM")~'health',
-    Event %in% c( "GOHOME",  "MOVE", "TOCLOSE". "TOGROWR")~'mgmt',
+    Event %in% c( "GOHOME",  "MOVE", "TOCLOSE", "TOGROWR")~'mgmt',
     Event %in% c("DIED", "FRESH", "SOLD", "DRY")~'param',
     Event %in% c("INWEIGH", "MEASURE", "TP")~'measure',
     Event %in% c("BANGVAC", "VACC")~'vac',
