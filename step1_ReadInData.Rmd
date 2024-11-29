@@ -59,11 +59,15 @@ list_files<-list.files('Data/EventFiles') #folder name where event files are loc
 events<-NULL
 
 for (i in seq_along(list_files)){
-  df<-read_csv(paste0('Data/EventFiles/', list_files[i]), col_types = cols(.default = 'c'))%>% #reads in all data as character string
+  df<-read_csv(paste0('Data/EventFiles/', 
+                      list_files[i]), 
+               #reads in all data as character string
+               col_types = cols(.default = 'c'))%>% 
     mutate(Remark = str_replace_all(Remark, "[^[:alnum:]]", "_")) #gets rid of weird characters that mess up encoding or parsing
     
   events<-bind_rows(events, df)
 }
+
 
 ```
 
@@ -224,6 +228,7 @@ ggplot(total_animals)+
 
 
 ### QC Event Types
+Events not classified 
 
 ```{r}
 if (dim(QC_event_type)[1]<1){
