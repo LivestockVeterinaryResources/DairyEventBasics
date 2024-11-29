@@ -18,9 +18,10 @@ fxn_event_type_default<-function(df){
     #define event types------------------------------------
   mutate(event_type = case_when(
     Event %in% c("ABORT","BRED", "BULLPEN", "GNRH", "HEAT", "LUT", "RECHK",
-                 "OK", "OPEN", "PREG", "PREV", "PROST", "PG", "DNB")~'repro',
+                 "OK", "OPEN", "PREG", "PREV", "PROST", "PG", "DNB",
+                 "CIDR")~'repro',
     Event %in% c ("ASSIST", "BLOAT", "DIPTHRA", "FEVER",  "ILLMISC", "INDIG", 
-                  "INJURY", "MF", "DA",
+                  "INJURY", "MF", "DA", "METR", "KETOSIS",
                   "LAME", "MAST", "NAVEL", "OTHER","OTITIS",  "PINKEYE", "PNEU",
                   "RP",
                   "SCOURS",  "SEPTIC", "HARDWARE", "CULTURE", "FOOTTRIM", "TRIM", 
