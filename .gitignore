@@ -51,7 +51,7 @@ rsconnect/
 Data/StandardizationFiles/*.*
 Data/IntermediateFiles/*.*
 Data/QCFiles/*.*
-Data/EventFiles/*.*
+#Data/EventFiles/*.*
 Data/TemplateFiles/*.*
 *.html
 
