@@ -53,6 +53,8 @@ Data/IntermediateFiles/*.*
 Data/QCFiles/*.*
 Data/EventFiles/*.*
 Data/TemplateFiles/*.*
+Data/StashedFiles/*.*
+
 *.html
 
 #checkto see if push/pull is working
