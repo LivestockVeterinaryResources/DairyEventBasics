@@ -38,6 +38,7 @@ The code in chunk 3 will read in all files in this folder so do not leave old fi
 
 ```{r}
 library(tidyverse)
+library(dtplyr)
 library(gt)
 
 #custom functions, turn off or on  on line 124 and 126
@@ -184,7 +185,11 @@ QC_event_type<-events2%>%
   group_by(Event, Protocols, event_type)%>%
   summarize(count = sum(n()))%>%
   ungroup()
+
 write_rds(QC_event_type, 'Data/QCFiles/QC_event_type.rds')
+
+fig_width = dim(QC_event_type)[1]*.5
+fig_height = dim(QC_event_type)[2]*6
 
 
 QC_source_farm<-events2%>%
@@ -221,7 +226,7 @@ total_animals%>%
   gt()
 
 ggplot(total_animals)+
-  geom_bar(aes(x = year, y = count_animals), stat = 'identity')+
+  geom_bar(aes(x = factor(year), y = count_animals), stat = 'identity')+
   facet_grid(.~LACTgroup)
 
 ```
@@ -231,13 +236,14 @@ ggplot(total_animals)+
 ### QC Event Types
 Events not classified 
 
-```{r}
+```{r, fig.width = fig_width, fig.height = fig_height}
 if (dim(QC_event_type)[1]<1){
   print('All Event Types Mapped')
 }else{
   ggplot(QC_event_type)+
     geom_bar(aes(x = Protocols, y = count), stat = 'identity', fill = 'red')+
-    facet_wrap(Event~., scales = 'free_x')
+    facet_wrap(Event~., scales = 'free_x')+
+    theme(axis.text.x = element_text(angle= 45, hjust = 1))
 }
 
 summarize_event_type<-events2%>%

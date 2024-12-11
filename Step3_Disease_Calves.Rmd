@@ -1,0 +1,421 @@
+---
+title: "Disease"
+output:
+  pdf_document: default
+  html_document: default
+date: "2024-11-08"
+---
+
+```{r setup, include=FALSE}
+#knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+```
+
+```{r packages, include = FALSE}
+library(tidyverse)
+
+```
+
+## Choose events of interest
+
+Modify the filter on line 26 so it includes only the events you are interested in.  
+The fewer events the faster the code runs.
+
+Add additional variables here in this chunk if they are improtant to define disease.  For example, if the specific lame diagnosis is within the remark, create a new variable that can then be used in the "group_by" of the lag function.  You will want to separate the diagnosis from location and then decide which are relevent for inclusion in the lag code.  
+
+
+
+```{r read_in_data}
+#read in file, and limit it to the events of interest
+tx<-read_rds('Data/IntermediateFiles/events2.rds')%>%
+  filter(LACT==0)%>%
+  filter(event_type %in% 'health') #make this filter whatever you are interested in, the fewer the events the faster the code runs
+#
+
+
+```
+
+
+## Define Disease
+
+```{r lag_code}
+source('FUNCTIONS/fxn_lag_master.R')
+
+
+arrange_vars <- alist(animal_id, ID,  date) #removed: Reason2, Disease, we need a "stop if list contains 'lag'
+
+sort_vars <- c( 'animal_id', 'ID' ) #Often Event is equal to diagnosis, but not always.  Choose to include or exclude variables based on your question
+
+#Gap1 : fundamental gap defining a new incidence of disease----------------------
+
+set_dz_gap<- 14 #set at 14 for example, but modify this to whatever makes sense for the question
+
+diseases<-test_fxn1(x = tx%>%rowid_to_column(),
+                arrange_var = arrange_vars,
+                mutate_var = sort_vars,
+                prefix = "dz_",
+                gap = set_dz_gap)%>% #gap set to identify regimens
+  rename(dz_key = key,
+         dz_date_gap = date_gap,
+         dz_ct = lag_ct)%>%
+  select(-(contains('lag')))
+
+
+
+#write_rds(disease, 'Data/IntermediateFiles/disease_calves.rds')
+
+
+
+
+```
+
+## Disease Details
+
+This section summarizes each disease event (dz_key) by listing the events, remarks, protocols, and technicians.
+
+```{r outcomes}
+#each row is an animal disease event -------------------------
+disease_details<-diseases%>%
+  #filter(animal_id %in% '14041067_12/28/23')%>% #for testing
+  arrange(animal_id, dz_key, date)%>%
+  group_by(animal_id, dz_key)%>%
+  summarize(list_events = paste0(sort(unique(Event)), collapse = ','), 
+            list_remarks = paste0(sort(unique(Remark)), collapse = ','), 
+            list_protocols = paste0(sort(unique(Protocols)), collapse = ','), 
+            list_technicians = paste0(sort(unique(Technician)), collapse = ','),
+            date_start = min(date), 
+            date_end = max(date),
+            dim_start = min(DIM), 
+            dim_end = max(DIM),
+            ct_row = sum(n()))%>%
+  ungroup()
+
+write_rds(disease_details, 'Data/IntermediateFiles/disease_details_calves.rds')
+
+```
+
+
+## Example code to report specific diseases - i.e. Scours
+
+
+
+```{r outcomes}
+disease_wide<-disease_details%>%
+  mutate(detect_disease = case_when(
+    (list_events %in% 'SCOURS')~'SCOURS',
+    str_detect(list_events, 'SCOURS')~'SCOURSComplex', 
+    TRUE~'NONE'
+  ))%>%
+  filter(!(detect_disease %in% 'NONE'))%>%
+  #filter(animal_id %in% '14041067_12/28/23')%>% #for testing
+  arrange(animal_id, detect_disease, date_start)%>%
+  group_by(animal_id, detect_disease)%>%
+  mutate(pull_ct = 1:n())%>%
+  ungroup()%>%
+  mutate(pull_ct_txt = paste0(detect_disease, pull_ct))%>%
+  select(animal_id, date_start,  pull_ct_txt)%>%
+  distinct()%>%
+  pivot_wider(names_from = pull_ct_txt, 
+              values_from = date_start)%>%
+  distinct()
+```
+
+```{r outcomes}
+animals<-read_rds('Data/IntermediateFiles/master_animals.rds')
+
+DiseaseAgeRange<-c(0, 60) #set disease age range
+
+disease_survival<-animals%>%
+  left_join(disease_wide)%>%
+  mutate(AGE_scour1 = as.numeric(SCOURS1-bdat), 
+         AGE_scour2 = as.numeric(SCOURS2-bdat), 
+         AGE_scour_complex1 = as.numeric(SCOURSComplex1-bdat),
+         AGE_scour_complex2 = as.numeric(SCOURSComplex2-bdat)
+  )%>%
+  mutate(Disease_status = case_when(
+    is.na(AGE_scour1)~'No Scours', 
+    AGE_scour1<61~'Scour1 at <60 days', 
+    AGE_scour1>=61~'Scour1 Day 60+', 
+    TRUE~'ERROR'
+  ))%>%
+  mutate(Scour_status = case_when(
+        AGE_scour1<61~1, 
+        TRUE~0)
+        )%>%
+  mutate(Cohort_Birth_month = floor_date(bdat, unit = 'months'))
+
+
+
+
+```
+
+### Understand Timing of Disease 
+
+```{r}
+ggplot(disease_survival)+
+  geom_density(aes(x = AGE_scour1), color = 'blue')+
+  geom_density(aes(x = AGE_scour_complex1), color = 'cyan')+
+  geom_density(aes(x = AGE_scour2), color = 'red')+
+  geom_density(aes(x = AGE_scour_complex2), color = 'orange')
+
+```
+
+
+### Disease Incidence Over Time
+```{r}
+
+birth_cohort_disease<-disease_survival%>%
+  group_by(Cohort_Birth_month)%>%
+  mutate(ct_animals_total = n_distinct(animal_id))%>%
+  ungroup()%>%
+  group_by(Cohort_Birth_month, Disease_status, ct_animals_total)%>%
+  summarize(ct_animals = n_distinct(animal_id))%>%
+  ungroup()
+
+birth_cohort_disease_farm<-disease_survival%>%
+  group_by(source_farm, Cohort_Birth_month)%>%
+  mutate(ct_animals_total = n_distinct(animal_id))%>%
+  ungroup()%>%
+  group_by(source_farm, Cohort_Birth_month, Disease_status, ct_animals_total)%>%
+  summarize(ct_animals = n_distinct(animal_id))%>%
+  ungroup()
+
+ggplot()+
+  geom_point(birth)
+
+```
+
+
+### First Treatment Outcomes
+
+#### Calendar Trends
+#### Days of Age at Event1
+#### Compare Groups - survival plots
+
+
+
+
+
+
+
+
+We need to add the dead detail data before we can interpret outcomes. They are extremely OPTIMISTIC without it. 
+
+#### 30 day outcomes
+
+```{r outcome_summary}
+outcomes30<-df_30%>%
+  group_by(Pen_simple, g30_outcome, g30_pull_ct)%>%
+  summarize(
+            ct_pull = n_distinct(g30_key))%>%
+  ungroup()%>%
+  pivot_wider(names_from = g30_outcome, values_from = ct_pull)%>%
+  mutate(total = `Final Tx` + Retreat)%>%
+  mutate(pctRetreat = Retreat/total, 
+         pctSuccess = `Final Tx`/total)
+
+targets<-tibble(g30_pull_ct = c(1, 2, 3), 
+                target_success = c(.8, .5, .3), 
+                limit_retreat = c(.2, .5, .7))
+
+ggplot(outcomes30%>%
+         filter(g30_pull_ct<4))+
+  geom_hline(data = targets,
+             aes(yintercept = target_success), color = 'red')+
+    geom_text(data = targets,
+              aes(y = target_success, x = Inf, label = 'Target'), color = 'red', hjust = 1, vjust = 1)+
+  geom_bar(aes(x = Pen_simple, y = pctSuccess, fill = factor(g30_pull_ct)), stat = 'identity')+
+  facet_grid(g30_pull_ct~.)+
+  labs(title = 'Treatment Success')+
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))+
+  scale_fill_manual(values = c('#252525', '#636363', '#969696'))+
+  theme_bw()+
+  labs(fill = 'Pull Count')+
+  ylab('Percent of Treatments')+
+  xlab('Pen')
+
+
+# ggplot(outcomes30%>%
+#          filter(g30_pull_ct<4))+
+#   geom_bar(aes(x = Pen_simple, y = pctRetreat, fill = factor(g30_pull_ct)), stat = 'identity')+
+#   geom_hline(aes(yintercept = .2), color = 'black')+
+#     geom_text(aes(y = .2, x = Inf, label = 'Limit'), color = 'black', hjust = 1, vjust = 1)+
+# 
+#   facet_grid(g30_pull_ct~.)+
+#   labs(title = 'Treatment Failures')+
+#   scale_y_continuous(labels = scales::percent_format(accuracy = 1))+
+#   scale_fill_manual(values = c('#a50f15', '#de2d26', '#fb6a4a'))+
+#   theme_bw()
+
+
+
+```
+
+\newpage
+
+
+
+
+#### 3 day outcomes
+
+These are the outcomes if we evaluate at day 3 after first treatment.
+
+```{r}
+outcomes3<-df_30%>%
+  group_by(Pen_simple, g3_outcome, g3_pull_ct)%>%
+  summarize(
+            ct_pull = n_distinct(g3_key))%>%
+  ungroup()%>%
+  pivot_wider(names_from = g3_outcome, values_from = ct_pull)%>%
+  mutate(total = `Final Tx` + Retreat)%>%
+  mutate(pctRetreat = Retreat/total, 
+         pctSuccess = `Final Tx`/total)
+
+targets<-tibble(g3_pull_ct = c(1, 2, 3), 
+                target_success = c(.8, .5, .3))
+
+ggplot(outcomes3%>%
+         filter(g3_pull_ct<4))+
+  geom_hline(data = targets,
+             aes(yintercept = target_success), color = 'red')+
+    geom_text(data = targets,
+              aes(y = target_success, x = Inf, label = 'Target'), color = 'red', hjust = 1, vjust = 1)+
+  geom_bar(aes(x = Pen_simple, y = pctSuccess, fill = factor(g3_pull_ct)), stat = 'identity')+
+  facet_grid(g3_pull_ct~.)+
+  labs(title = 'Treatment Success')+
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))+
+  scale_fill_manual(values = c('#252525', '#636363', '#969696'))+
+  theme_bw()+
+  labs(fill = 'Pull Count')+
+  ylab('Percent of Treatments')+
+  xlab('Pen')
+
+
+# ggplot(outcomes3%>%
+#          filter(g3_pull_ct<4))+
+#   geom_bar(aes(x = Pen_simple, y = pctRetreat, fill = factor(g3_pull_ct)), stat = 'identity')+
+#   geom_hline(aes(yintercept = .2), color = 'black')+
+#     geom_text(aes(y = .2, x = Inf, label = 'Limit'), color = 'black', hjust = 1, vjust = 1)+
+# 
+#   facet_grid(g3_pull_ct~.)+
+#   labs(title = 'Treatment Failures')+
+#   scale_y_continuous(labels = scales::percent_format(accuracy = 1))+
+#   scale_fill_manual(values = c('#a50f15', '#de2d26', '#fb6a4a'))+
+#   theme_bw()
+# 
+
+
+```
+
+\newpage
+
+#### 7 day outcomes
+
+These are the outcomes if we evaluate at day 7 after first treatment.
+
+```{r}
+outcomes7<-df_30%>%
+  group_by(Pen_simple, g7_outcome, g7_pull_ct)%>%
+  summarize(
+            ct_pull = n_distinct(g7_key))%>%
+  ungroup()%>%
+  pivot_wider(names_from = g7_outcome, values_from = ct_pull)%>%
+  mutate(total = `Final Tx` + Retreat)%>%
+  mutate(pctRetreat = Retreat/total, 
+         pctSuccess = `Final Tx`/total)
+
+targets<-tibble(g7_pull_ct = c(1, 2, 3), 
+                target_success = c(.8, .5, .3))
+
+ggplot(outcomes7%>%
+         filter(g7_pull_ct<4))+
+  geom_hline(data = targets,
+             aes(yintercept = target_success), color = 'red')+
+    geom_text(data = targets,
+              aes(y = target_success, x = Inf, label = 'Target'), color = 'red', hjust = 1, vjust = 1)+
+  geom_bar(aes(x = Pen_simple, y = pctSuccess, fill = factor(g7_pull_ct)), stat = 'identity')+
+  facet_grid(g7_pull_ct~.)+
+  labs(title = 'Treatment Success')+
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1))+
+  scale_fill_manual(values = c('#252525', '#636363', '#969696'))+
+  theme_bw()+
+  labs(fill = 'Pull Count')+
+  ylab('Percent of Treatments')+
+  xlab('Pen')
+
+
+
+# ggplot(outcomes7%>%
+#          filter(g7_pull_ct<4))+
+#   geom_bar(aes(x = Pen_simple, y = pctRetreat, fill = factor(g7_pull_ct)), stat = 'identity')+
+#   geom_hline(aes(yintercept = .2), color = 'black')+
+#     geom_text(aes(y = .2, x = Inf, label = 'Limit'), color = 'black', hjust = 1, vjust = 1)+
+# 
+#   facet_grid(g7_pull_ct~.)+
+#   labs(title = 'Treatment Failures')+
+#   scale_y_continuous(labels = scales::percent_format(accuracy = 1))+
+#   scale_fill_manual(values = c('#a50f15', '#de2d26', '#fb6a4a'))+
+#   theme_bw()
+
+
+
+```
+
+
+
+\newpage
+
+ 
+
+### Graphical Animal Treatment Details
+
+Here is a quick way to look at individual animal treatment patterns.  These are some examples here, but can explore them all at:
+\textcolor{blue}{https://lvr-explore.shinyapps.io/AnimalTreatmentDetails/}. 
+ 
+I will provide a link so you can look at any animal after we add the dead list so we know the final outcomes.
+My observation is that our protocols are designed in a way that we touch these animals more often than I am used to seing.  I wonder if we are getting the right balance between enough drug without too much handling? 
+
+In most scenarios I am very comfortable with using a Nuflor protocol that is a single injection at 6 ml per 100lbs with a 4 day post treatment interval.  This results in the same or better outcome with less handling. The abomasal leasions make me unsure that we know what we have here, so that is why am I not strongly recommending this change.
+
+Baytril is a very short acting drug, however it is also a concentration dependent drug.  Therefore it has its best outcome at high dose.  Not sure what dose you are using here (3ml per 100?), but consider moving to 5 ml per 100 or greater if not already there.  This is a very short acting drug so 2 days is a very resonable post treatment interval. It gets very expensive quickly to come back with another full dose of baytril unless we know it is helping significantly.
+
+
+
+```{r}
+
+set_animal<-c('33223', '1149', '33222', '7185')
+
+ggplot(tx%>%
+         filter(tag %in% set_animal)%>%
+         mutate(Protocol = factor(Protocol, levels = levels_tx))
+       )+
+  geom_point(aes(x = Date, y = Protocol, color = Protocol), size = 5, shape = 16)+
+  theme_bw()+
+  facet_grid(tag~., scales = 'free_y')+
+  scale_color_manual(values = colors_drug)+
+  labs(title = 'Individual Drug Treatments')
+  
+ 
+  
+
+  
+  
+ggplot(therapy%>%
+         filter(tag %in% set_animal)%>%
+         mutate(Therapy = case_when(
+           (str_count(Protocols_simple)>35)~'Many Treatments', 
+           TRUE~Protocols_simple)
+         )
+       )+
+  geom_linerange(aes(xmin = date_tx_start, xmax = date_tx_end, y = Therapy), linewidth = 3)+
+    geom_point(aes(x = date_tx_start,  y = Therapy), size = 5)+
+  theme_bw()+
+  facet_grid(tag~., scales = 'free')+
+  labs(title = 'Therapy Durations')+
+  xlab('Date')
+  
+
+```
+
+
