@@ -105,7 +105,7 @@ compare_gaps<-disease60%>%
 #quick and dirty dz numerator by month
 ```{r}
 monthly_dz<-disease60%>%
-  mutate(floordate_month = floor_date(date, units = 'month'))%>%
+  mutate(floordate_month = floor_date(date, unit = 'months'))%>%
   group_by(Event, LACTgroup, floordate_month)%>%
   summarize(ct_dz7 = sum(dz7_ct), 
             ct_dz60 = sum(dz60_ct))%>%
@@ -143,6 +143,7 @@ write_rds(disease_dates, 'Data/IntermediateFiles/disease_dates.rds')
 
 disease_dates_wide<-disease_dates%>%
   select(animal_id, disease_name, date_start)%>%
+  distinct()%>%
   pivot_wider(names_from = disease_name, 
               values_from = date_start)
 write_rds(disease_dates_wide, 'Data/IntermediateFiles/disease_dates_wide.rds')
