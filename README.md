@@ -2,6 +2,8 @@
 
 The goal of this is to streamline initial data processing so that more time can be spent acting on conclusions from data rather than processing it.  The example code below pulls 5 years of data in order to have the opportunity to look at trends over at least 3 years with complete lactations for most cows.  However, depending on what you want to look at, a shorter time frame may be utilized.
 
+This workflow is set up to intentionally NOT share original data files due to both their size and privacy. For this reason any files you put in the Data/ subfolders will not be shared to git unless they are in the Data/SharedFiles folder.
+
 Step 1 - Pull the data
 We need the following items from Dairy Comp along with the columns always generated with an events2 command in DC305
 "ID"         "PEN"        "REG"        "EID"        "CBRD"      
