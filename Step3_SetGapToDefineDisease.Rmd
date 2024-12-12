@@ -14,16 +14,17 @@ knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
 
 ```{r packages, include = FALSE}
 library(tidyverse)
+library(dtplyr)
 
 ```
 
 ## Choose events of interest
 
-Modify the filter on line 26 so it includes only the events you are interested in.  The fewer events the faster the code runs.
+Modify the filter on line 26 so it includes only the events you are interested in.  The fewer events the faster the code runs.  The main function can run off any set of variables that has one real date in it.  So, the grouping is entirely flexible.  The only requirement is that there are ZERO NA values in any of the variables that are used in the groupby.
 ```{r read_in_data}
 #read in file, and limit it to the events of interest
-tx<-read_rds('Data/IntermediateFiles/events2.rds')%>%
-  filter(event_type %in% 'health') #make this filter whatever you are interested in, the fewer the events the faster the code runs
+tx<-read_rds('Data/IntermediateFiles/events2.rds')#%>%
+  #filter(event_type %in% 'health') #make this filter whatever you are interested in, the fewer the events the faster the code runs
 
 
 
@@ -38,44 +39,69 @@ animals<-read_rds('Data/IntermediateFiles/master_animals.rds')
 
 
 
-## Treatment Outcomes (Incomplete - need dead data)
+## Diesease/Therapy
+
+This chunk adds variables to the original data frame which are new grouping variables based on whatever "gap" you have set. For gap exploration you can run the code multiple times seting new gaps and feeding the previous data frame into the new gap function.  Your original data will get wider and have the flexibility to group by whichever gap setting you choose.
 
 ```{r lag_code}
 source('FUNCTIONS/fxn_lag_master.R')
 
 
 
+arrange_vars <- alist(source_farm, source_state, animal_id, ID, Event, date) #this list should contain all variables of interest including the date variable, do NOT use quotes
 
-arrange_vars <- alist(source_farm, source_state, animal_id, ID,  date) #removed: Reason2, Disease, we need a "stop if list contains 'lag'
+sort_vars <- c('source_farm', 'source_state', 'animal_id', 'ID', 'Event') #this list must be identical to the arrange variables but EXCLUDE the date variable and add quotes
 
-sort_vars <- c('source_farm', 'source_state', 'animal_id', 'ID' ) #Often Event is equal to diagnosis, but not always.  Choose to include or exclude it based on the question.
+#Gap1 : fundamental gap defining a new incidence of disease - in this case it is set to 7 ----------------------
 
-#Gap1 : fundamental gap defining a new incidence of disease----------------------
+set_dz_gap<- 7 #set at 7 for example, but modify this to whatever makes sense for the question
 
-set_dz_gap<- 14 #set at 14 for example, but modify this to whatever makes sense for the question
-
-diseases<-test_fxn1(x = tx%>%rowid_to_column(),
+disease7<-test_fxn1(x = tx%>%rowid_to_column(), #x = your data frame with a rowid variable
                 arrange_var = arrange_vars,
                 mutate_var = sort_vars,
-                prefix = "dz_",
+                prefix = "dz7_",
                 gap = set_dz_gap)%>% #gap set to identify regimens
-  rename(dz_key = key,
-         dz_date_gap = date_gap,
-         dz_ct = lag_ct)%>%
+  rename(dz7_key = key, #this variable uniquely identifies the rows of data belonging to each disease, n_distinct can be used to count these, or this variable gan be used to group and summarize drugs used or other things of interest like times touched or locations included (for feet and mastitis)
+         dz7_date_gap = date_gap, #this specifies the number of days between this row and the previous row in the disease 
+         dz7_ct = lag_ct)%>% #this is a logic variable used primarily for fast data exploration/summary when defining gap setings, it can be summed with no group by function which improves speed
+  select(-(contains('lag'))) #this is just to clean up the transient variables used to calculate the disease grouping variables.
+
+#Gap2 : fundamental gap defining a new incidence of disease - in this case it is set to 60----------------------
+
+set_dz_gap<- 60 #set at 7 for example, but modify this to whatever makes sense for the question
+
+disease60<-test_fxn1(x = disease7, #if adding aditional gap options feed in the dataframe created with the previous gap setting
+                arrange_var = arrange_vars,
+                mutate_var = sort_vars,
+                prefix = "dz60_",
+                gap = set_dz_gap)%>% #gap set to identify regimens
+  rename(dz60_key = key,
+         dz60_date_gap = date_gap,
+         dz60_ct = lag_ct)%>%
   select(-(contains('lag')))
 
 
 
-write_rds(disease, 'Data/IntermediateFiles/disease.rds')
 
-
-  
-
-  
+write_rds(disease60, 'Data/IntermediateFiles/disease60.rds')
 
 
 
 ```
+
+
+#quick and dirty comparison of gap settings
+
+```{r}
+compare_gaps<-disease60%>%
+  group_by(Event)%>%
+  summarize(ct_dz7 = sum(dz7_ct), 
+            ct_dz60 = sum(dz60_ct))%>%
+  ungroup()%>%
+  mutate(pct_diff_gap = round(((ct_dz7-ct_dz60)/ct_dz7)*100, digits = 4))
+
+```
+
 
 ```{r outcomes}
 
